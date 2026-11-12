@@ -34,6 +34,9 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
   is found, use `$PWD`. Do this in Go and **never invoke host `git` for discovery**, because a hostile repo's
   `core.fsmonitor` and similar settings must never run on the host. Where host `git` is unavoidable (worktree mode),
   it is always run hardened (section 5.4).
+- The project root is refused when it is `$HOME` or above it (a dotfiles repo with `~/.git` would otherwise make the
+  whole home the project), when it overlaps the agent-sandbox config dir, the data dir, `$XDG_RUNTIME_DIR`, `~/.ssh`
+  or `~/.gnupg`, or when it contains `:` or `,` (podman's `-v` syntax cannot express them).
 - Project ID: `<basename(root)>-<hex(sha256(abs root path))[:8]>`. Two checkouts of the same repo get two separate
   sandboxes.
 - Sandbox name: `-n/--name NAME`, default `default`.
@@ -144,10 +147,14 @@ Validation:
     socket there is a full host escape, and `ro` does not stop `connect()` on a socket), `~/.ssh`, `~/.gnupg`,
     `~/.config`, `~/.local/share/containers` or the agent-sandbox data dir `~/.local/share/agent-sandbox`;
   - it is an **ancestor** of the project root or of the data dir (mounting `~/src` read-write would bypass the `.git`
-    and deny-list overlays);
-  - the mount is read-write and `src` is a dotfile or dot-directory directly under `$HOME` (`~/.bashrc`,
-    `~/.profile`, ...).
-- `mounts[].dst` must be absolute after `~` expansion and must not shadow the project mount or the binary mount.
+    and deny-list overlays), or lies **inside** the project root (mounting `<root>/.git` separately would do the
+    same);
+  - the mount is read-write and `src` is a dotfile under `$HOME` or lies inside a dot-directory under `$HOME`
+    (`~/.bashrc`, `~/.profile`, `~/.local/bin`, ...), or overlaps a directory on the host `$PATH` (`~/bin`);
+  - it contains `:` or `,`.
+- `mounts[].dst` must be absolute after `~` expansion. It must not be `/` or `$HOME` (the home volume), must not lie
+  inside the project root, and must not lie inside `/usr/local/bin/agent-sandbox`, `/cache`, `/run/asb`, `/proc`,
+  `/sys` or `/dev`.
 - `env` must not set reserved keys: `HOME`, `PATH`, `USER`, `GIT_CONFIG_*`, `HTTP_PROXY`, `HTTPS_PROXY`,
   `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy`, or any env var a cache preset sets.
 
