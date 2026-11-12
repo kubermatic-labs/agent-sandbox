@@ -235,8 +235,14 @@ between projects: a shared home would let an agent in project A plant `~/.claude
 
   ```
   podman run --rm --userns=keep-id --user <uid>:<gid> --network none
-    -v <volume>:/v:U [-v ~/.config/agent-sandbox/home:/seed:ro] <image> sh -c 'cp -a /seed/. /v/'   # cp only for home with a seed
+    -v <volume>:/v:U [-v <seed copy>:/seed:ro,Z] <image> sh -c '[cp -R --preserve=mode,timestamps /seed/. /v/ &&] touch /v/.agent-sandbox-volume'
   ```
+
+  The seed is copied without `cp -a`: that would also preserve the staged copy's private `:Z` SELinux label, which
+  the main container cannot read.
+
+  The marker file matters: podman chowns a volume that is still empty to the user of the next container that mounts
+  it (the main container's `--user 0:0`), which would undo `:U`. Verified on podman 6.1.
 
   For the seed mount, the wrapper copies the seed dir to a private temp dir first and mounts that copy with `:Z`, so
   the real config dir is never relabeled.

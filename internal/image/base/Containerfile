@@ -1,0 +1,21 @@
+# agent-sandbox base image (embedded in the binary; override with
+# ~/.config/agent-sandbox/base/Containerfile).
+FROM registry.fedoraproject.org/fedora:44
+
+RUN dnf -y install --setopt=install_weak_deps=False \
+        git ripgrep fd-find jq curl make gcc procps-ng less which ca-certificates \
+        nodejs npm \
+    && dnf clean all
+
+# The agents are baked into the image, installed globally and owned by root:
+# sessions run as an unprivileged user and cannot replace them. Self-update is
+# disabled as well, so agents do not try and fail on every start.
+ENV DISABLE_AUTOUPDATER=1 \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+RUN npm install -g --no-fund --no-audit \
+        @anthropic-ai/claude-code \
+        opencode-ai \
+        @openai/codex \
+    && npm cache clean --force
