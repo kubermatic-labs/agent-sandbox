@@ -36,6 +36,7 @@ type Resources struct {
 
 // Config is the merged, validated configuration.
 type Config struct {
+	Base         string // base image, one of Bases
 	Command      []string
 	Network      string
 	AllowCIDRs   []string
@@ -56,6 +57,7 @@ type Config struct {
 // Defaults returns the configuration used when no file sets a key.
 func Defaults() Config {
 	return Config{
+		Base:        Bases[0],
 		Network:     "restricted",
 		Git:         "ro",
 		IdleTimeout: 10 * time.Minute,
@@ -109,6 +111,7 @@ func Keys() []string {
 
 // file mirrors one TOML file; pointers distinguish unset keys from zero values.
 type file struct {
+	Base         *string           `toml:"base"`
 	Command      []string          `toml:"command"`
 	Network      *string           `toml:"network"`
 	AllowCIDRs   []string          `toml:"allow_cidrs"`
@@ -182,6 +185,9 @@ func decodeFile(path string) (*file, error) {
 }
 
 func (c *Config) apply(f *file) {
+	if f.Base != nil {
+		c.Base = *f.Base
+	}
 	if f.Command != nil {
 		c.Command = slices.Clone(f.Command)
 	}

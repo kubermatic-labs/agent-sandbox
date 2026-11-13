@@ -46,6 +46,7 @@ func TestLoadMissingFilesGiveDefaults(t *testing.T) {
 
 func TestLoadMerge(t *testing.T) {
 	global := `
+base = "alpine:3"
 command = ["claude"]
 network = "open"
 allow_cidrs = ["10.0.0.1", "192.168.1.0/24"]
@@ -56,6 +57,7 @@ strict = true
 git_user_name = "Agent"
 `
 	project := `
+base = "debian:12"
 command = ["opencode", "--x"]
 git = "worktree"
 idle_timeout = "30m"
@@ -70,6 +72,7 @@ strict = false
 		t.Fatal(err)
 	}
 	want := Config{
+		Base:        "debian:12",
 		Command:     []string{"opencode", "--x"},
 		Network:     "open",
 		AllowCIDRs:  []string{"10.0.0.1", "192.168.1.0/24", "10.0.0.2"},
@@ -93,6 +96,7 @@ func TestLoadErrors(t *testing.T) {
 	}{
 		{"unknown key", "netwrok = \"open\"", []string{"project.toml", "unknown key", "netwrok"}},
 		{"unknown nested key", "[[mounts]]\nsrc = \"/x\"\ndst = \"/y\"\nmode = \"ro\"", []string{"mounts.mode"}},
+		{"bad base", `base = "fedora:44"`, []string{"base", "fedora:44", "debian:12"}},
 		{"bad network", `network = "wide"`, []string{"project.toml", "network", "wide"}},
 		{"bad git", `git = "rw"`, []string{"git"}},
 		{"bad cache", `caches = ["cargo"]`, []string{"caches", "cargo"}},

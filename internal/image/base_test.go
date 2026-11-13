@@ -5,22 +5,64 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/podman/podmantest"
 )
 
+// Every base the config accepts has its own Containerfile, and they differ.
+func TestEmbeddedContainerfiles(t *testing.T) {
+	tags := map[string]string{}
+	for _, base := range config.Bases {
+		b, err := EmbeddedContainerfile(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		distro, version, _ := strings.Cut(base, ":")
+		if !regexp.MustCompile(`(?m)^FROM \S+/` + regexp.QuoteMeta(distro+":"+version) + `$`).Match(b) {
+			t.Errorf("%s: Containerfile does not build FROM %s", base, base)
+		}
+		for _, want := range []string{"DISABLE_AUTOUPDATER=1", "@anthropic-ai/claude-code", "process.versions.node", "ripgrep", "git"} {
+			if !bytes.Contains(b, []byte(want)) {
+				t.Errorf("%s: Containerfile lacks %q", base, want)
+			}
+		}
+		dir, cleanup, err := BaseContext(base, filepath.Join(t.TempDir(), "none"), t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		tag, err := BaseTag(dir)
+		cleanup()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if other, ok := tags[tag]; ok {
+			t.Errorf("%s and %s have the same tag %s", base, other, tag)
+		}
+		tags[tag] = base
+	}
+	if _, err := EmbeddedContainerfile("gentoo:1"); err == nil {
+		t.Error("unknown base accepted")
+	}
+}
+
 func TestBaseContextEmbedded(t *testing.T) {
 	work := t.TempDir()
-	dir, cleanup, err := BaseContext(filepath.Join(t.TempDir(), "no-override"), work)
+	embedded, err := EmbeddedContainerfile("fedora:45")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, cleanup, err := BaseContext("fedora:45", filepath.Join(t.TempDir(), "no-override"), work)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "Containerfile"))
-	if err != nil || !bytes.Equal(b, embeddedContainerfile) {
+	if err != nil || !bytes.Equal(b, embedded) {
 		t.Fatalf("embedded Containerfile not written: %v", err)
 	}
 	tag1, err := BaseTag(dir)
@@ -32,7 +74,7 @@ func TestBaseContextEmbedded(t *testing.T) {
 		t.Error("cleanup did not remove the context dir")
 	}
 
-	dir2, cleanup2, err := BaseContext(filepath.Join(t.TempDir(), "no-override"), work)
+	dir2, cleanup2, err := BaseContext("fedora:45", filepath.Join(t.TempDir(), "no-override"), work)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +86,15 @@ func TestBaseContextEmbedded(t *testing.T) {
 }
 
 func TestBaseContextOverride(t *testing.T) {
-	override := t.TempDir()
+	root := t.TempDir()
+	override := filepath.Join(root, "debian")
+	if err := os.Mkdir(override, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(override, "Containerfile"), []byte("FROM x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dir, cleanup, err := BaseContext(override, t.TempDir())
+	dir, cleanup, err := BaseContext("debian:12", root, t.TempDir())
 	if err != nil || dir != override {
 		t.Fatalf("BaseContext = %q, %v; want override dir", dir, err)
 	}
@@ -63,6 +109,25 @@ func TestBaseContextOverride(t *testing.T) {
 	after, _ := BaseTag(override)
 	if before == after {
 		t.Error("adding a context file must change the tag")
+	}
+
+	// The debian override does not apply to other bases.
+	dir, cleanup, err = BaseContext("fedora:45", root, t.TempDir())
+	if err != nil || dir == override {
+		t.Fatalf("BaseContext(fedora) = %q, %v; want the embedded context", dir, err)
+	}
+	cleanup()
+}
+
+// The override location from before there was a choice of bases is refused,
+// so an override is never silently dropped.
+func TestBaseContextLegacyOverride(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Containerfile"), []byte("FROM x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := BaseContext("fedora:45", root, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no longer used") {
+		t.Errorf("legacy override: err = %v", err)
 	}
 }
 
@@ -110,7 +175,7 @@ func TestEnsureBase(t *testing.T) {
 				return podmantest.Result{}
 			}}
 			var out bytes.Buffer
-			tag, err := EnsureBase(context.Background(), podman.Client{R: f},
+			tag, err := EnsureBase(context.Background(), podman.Client{R: f}, "fedora:45",
 				filepath.Join(t.TempDir(), "none"), t.TempDir(), BuildOptions{}, tt.force, &out)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v", err)

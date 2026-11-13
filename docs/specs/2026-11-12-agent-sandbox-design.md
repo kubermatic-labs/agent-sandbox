@@ -67,7 +67,7 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
 
 ```
 agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
-agent-sandbox init                                    # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
+agent-sandbox init [--base IMAGE]                     # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
 agent-sandbox status [--all]                          # sandboxes for this project (or all, plus volumes): name, state, uptime, sessions, stale, git mode
@@ -83,8 +83,10 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
 - An `asb` symlink to the binary behaves the same.
 - `status`: sessions are the container's processes other than PID 1 and the proxy (from `podman top`). A sandbox is
   stale when it runs another agent-sandbox binary, or an image whose tag a newer build has taken.
-- `init` writes a fully commented `config.toml` and a `Containerfile` with only `ARG BASE_IMAGE` / `FROM ${BASE_IMAGE}`,
-  then records them as trusted; it refuses if `.agent-sandbox/` exists.
+- `init` writes a fully commented `config.toml` and a `Containerfile` with only `ARG BASE_IMAGE` / `FROM ${BASE_IMAGE}`
+  (plus a commented install example in the base's package manager), then records them as trusted; it refuses if
+  `.agent-sandbox/` exists. `--base` (one of the bases in section 3.3) is written to `config.toml` as `base`, the only
+  uncommented key; without it `base` stays commented, so the global config or the default applies.
 - `worktree rm` with `--force` also stops a running sandbox and discards uncommitted changes. If the worktree
   directory is already gone, it runs `git worktree prune`.
 
@@ -134,6 +136,7 @@ If the container vanishes between step 6 and the exec (the idle race), retry ste
   have changed since the trust check.
 
 ```toml
+base          = "fedora:45"         # fedora:45 (default) | debian:12 | ubuntu:26.04 | alpine:3, see 3.3
 command       = ["claude"]          # default exec target
 network       = "restricted"        # restricted (default) | open | allowlist
 allow_cidrs   = []                  # restricted mode: extra reachable private CIDRs / host IPs
@@ -161,7 +164,7 @@ services such as `sentry.io` are open exfiltration channels, because anyone can 
 Validation:
 
 - Unknown keys are an error.
-- `network`, `git` and `caches` values must be from the known sets.
+- `base`, `network`, `git` and `caches` values must be from the known sets.
 - `mounts[].src` is resolved (`~` expanded, symlinks resolved) and then refused when:
   - it is `/` or `$HOME` itself;
   - it is under `/etc`, `/usr`, `/boot`, `/proc`, `/sys`, `/dev`, `/run`, `/var/run`, `$XDG_RUNTIME_DIR` (the podman
@@ -192,15 +195,23 @@ tokens (section 11).
 
 **Base image**
 
-- Its Containerfile is embedded in the binary (`go:embed`). It can be overridden by
-  `~/.config/agent-sandbox/base/Containerfile`, and the build context is that directory.
-- Fedora-based. Contents: git, ripgrep, fd-find, jq, curl, make, gcc, procps-ng, less, which, ca-certificates, plus
-  the agents `claude`, `opencode` and `codex` **baked into the image with auto-update disabled** (for example
+- The config key `base` selects one of four bases: `fedora:45` (default), `debian:12`, `ubuntu:26.04`, `alpine:3`.
+  Each has its own Containerfile, embedded in the binary (`go:embed`) at `internal/image/base/<distro>/Containerfile`,
+  where `<distro>` is the part before the colon. `~/.config/agent-sandbox/base/<distro>/Containerfile` overrides one
+  base, and the build context is that directory. `~/.config/agent-sandbox/base/Containerfile` (the override location
+  before there was a choice) is refused with an error rather than silently ignored.
+- Contents: git, ripgrep, fd, jq, curl, make, gcc, procps, less, ca-certificates, gh, python3, plus the agents
+  `claude`, `opencode` and `codex` **baked into the image with auto-update disabled** (for example
   `DISABLE_AUTOUPDATER=1` in the image env). Agents live in the image rather than the home volume, so an agent
-  cannot replace its own binary persistently.
-- Tag: `localhost/agent-sandbox-base:<hash>`, where `<hash>` is sha256 of the context files.
-- `build --pull` passes `--pull=always --no-cache` to refresh both the Fedora base and the agent versions. The tag
-  stays the same but the image ID changes, which is why stale detection compares image IDs, not tags.
+  cannot replace its own binary persistently. The agents need Node.js >= 22.19, and each Containerfile fails the
+  build on an older one. Debian 12's Node.js is too old, so the Debian and Ubuntu bases copy node and npm from the
+  official `node:24-bookworm-slim` image. The Ubuntu base deletes the image's `ubuntu` user (uid 1000), which would
+  otherwise take the place of the session user's passwd entry under `--userns=keep-id`. The Alpine base adds bash
+  (the default session command) and GNU coreutils (the volume init's `cp --preserve`).
+- Tag: `localhost/agent-sandbox-base:<hash>`, where `<hash>` is sha256 of the context files, so each base has its
+  own tag.
+- `build --pull` passes `--pull=always --no-cache` to refresh both the distribution image and the agent versions.
+  The tag stays the same but the image ID changes, which is why stale detection compares image IDs, not tags.
 
 **Project image**
 
@@ -601,7 +612,7 @@ cmd/agent-sandbox/main.go
 internal/project     # root discovery, IDs, cwd mapping
 internal/config      # TOML load/merge/validate, defaults (incl. allow_domains)
 internal/trust       # hash, snapshot, diff, prompt
-internal/image       # base (go:embed Containerfile) + project build, hashing, pruning
+internal/image       # base (go:embed Containerfile per base) + project build, hashing, pruning
 internal/podman      # thin CLI wrapper, --format json; no podman Go bindings
 internal/mounts      # mount plan per git mode and deny-list (security-critical, pure functions)
 internal/worktree    # git worktree add/list/rm, worktree_copy

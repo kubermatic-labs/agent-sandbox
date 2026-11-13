@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,7 +28,7 @@ type commands struct {
 	stop         func(ctx context.Context, name string, all bool, out io.Writer) error
 	worktreeList func(ctx context.Context, out io.Writer) error
 	worktreeRm   func(ctx context.Context, name string, force, deleteBranch bool, out io.Writer) error
-	scaffold     func(ctx context.Context, out io.Writer) error
+	scaffold     func(ctx context.Context, base string, out io.Writer) error
 }
 
 func main() {
@@ -97,14 +98,17 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 }
 
 func newScaffoldCmd(cmds commands) *cobra.Command {
-	return &cobra.Command{
-		Use:   "init",
+	var base string
+	cmd := &cobra.Command{
+		Use:   "init [--base IMAGE]",
 		Short: "Create .agent-sandbox/{config.toml,Containerfile} and trust them",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmds.scaffold(cmd.Context(), cmd.OutOrStdout())
+			return cmds.scaffold(cmd.Context(), base, cmd.OutOrStdout())
 		},
 	}
+	cmd.Flags().StringVar(&base, "base", "", "base image, written to config.toml: "+strings.Join(config.Bases, ", ")+" (default: the global config's, else "+config.Bases[0]+")")
+	return cmd
 }
 
 func newStatusCmd(cmds commands) *cobra.Command {
@@ -243,6 +247,6 @@ func newBuildCmd(buildFn func(context.Context, image.BuildOptions) error) *cobra
 		},
 	}
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "build without the layer cache")
-	cmd.Flags().BoolVar(&opts.Pull, "pull", false, "refresh the Fedora base and the agent versions (implies --no-cache)")
+	cmd.Flags().BoolVar(&opts.Pull, "pull", false, "refresh the distribution image and the agent versions (implies --no-cache)")
 	return cmd
 }

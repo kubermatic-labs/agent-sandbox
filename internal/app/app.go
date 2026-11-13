@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/term"
 
+	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/fspath"
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/paths"
@@ -105,6 +106,21 @@ func (e *env) projectConfig(state trust.State) string {
 	return filepath.Join(e.trustStore().SnapshotDir(), "config.toml")
 }
 
+// loadConfig loads the global config and, if the project is trusted, the
+// approved project config.
+func (e *env) loadConfig(state trust.State) (config.Config, error) {
+	p := e.paths
+	return config.Load(p.GlobalConfig(), e.projectConfig(state), config.Env{
+		Home:        p.Home,
+		ConfigHome:  p.ConfigHome,
+		DataHome:    p.DataHome,
+		XDGRuntime:  p.XDGRuntime,
+		DataDir:     p.DataDir,
+		ProjectRoot: e.proj.Root,
+		PathDirs:    filepath.SplitList(os.Getenv("PATH")),
+	})
+}
+
 // interactive reports whether a person can answer a prompt.
 func interactive() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
@@ -117,12 +133,13 @@ type images struct {
 	imageID string
 }
 
-// ensureImages builds what is missing (or everything with force). The
+// ensureImages builds what is missing (or everything with force), on the
+// base image base (config key base). The
 // project image is built from the trusted snapshot, never the live dir.
-func (e *env) ensureImages(ctx context.Context, state trust.State, opts image.BuildOptions, force bool) (images, error) {
+func (e *env) ensureImages(ctx context.Context, state trust.State, base string, opts image.BuildOptions, force bool) (images, error) {
 	var im images
 	var err error
-	if im.base, err = image.EnsureBase(ctx, e.pm, e.paths.BaseOverrideDir(), e.paths.RuntimeDir, opts, force, os.Stderr); err != nil {
+	if im.base, err = image.EnsureBase(ctx, e.pm, base, e.paths.BaseOverrideDir(), e.paths.RuntimeDir, opts, force, os.Stderr); err != nil {
 		return im, err
 	}
 	baseID, err := e.pm.ImageID(ctx, im.base)

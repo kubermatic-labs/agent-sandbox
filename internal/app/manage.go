@@ -13,7 +13,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/hostgit"
+	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
 	"k8c.io/agent-sandbox/internal/sandbox"
@@ -308,8 +310,14 @@ func WorktreeRm(ctx context.Context, name string, force, deleteBranch bool, out 
 	return nil
 }
 
-// Init scaffolds .agent-sandbox/ and records it as trusted (spec 3.4).
-func Init(_ context.Context, out io.Writer) error {
+// Init scaffolds .agent-sandbox/ and records it as trusted (spec 3.4). A
+// non-empty base (one of config.Bases) is written to config.toml; otherwise
+// the base key stays commented out and the global config or the default
+// applies.
+func Init(_ context.Context, base string, out io.Writer) error {
+	if base != "" && !slices.Contains(config.Bases, base) {
+		return fmt.Errorf("--base %q is not one of %s", base, strings.Join(config.Bases, ", "))
+	}
 	e, err := resolve()
 	if err != nil {
 		return err
@@ -321,7 +329,8 @@ func Init(_ context.Context, out io.Writer) error {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return err
 	}
-	for name, content := range map[string]string{"config.toml": configTemplate, "Containerfile": containerfileTemplate} {
+	files := map[string]string{"config.toml": scaffoldConfig(base), "Containerfile": scaffoldContainerfile(base)}
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
 		}
@@ -340,10 +349,14 @@ func Init(_ context.Context, out io.Writer) error {
 	return nil
 }
 
+// baseTemplateLine is the base line of configTemplate.
+const baseTemplateLine = `# base          = "fedora:45"         # fedora:45 | debian:12 | ubuntu:26.04 | alpine:3`
+
 const configTemplate = `# agent-sandbox project config. Changes need approval: 'agent-sandbox trust'.
 # The global config is ~/.config/agent-sandbox/config.toml; lists add up,
 # other keys here override it.
 
+` + baseTemplateLine + `
 # command       = ["claude"]          # default command; bash -l if unset
 # network       = "restricted"        # restricted | open | allowlist
 # allow_cidrs   = []                  # extra reachable private addresses
@@ -361,11 +374,38 @@ const configTemplate = `# agent-sandbox project config. Changes need approval: '
 # git_user_email = ""                 # default "agent-sandbox@localhost"
 `
 
-const containerfileTemplate = `# Project image, built on the agent-sandbox base image (Fedora with git,
+const containerfileTemplate = `# Project image, built on the agent-sandbox base image (%s with git,
 # ripgrep, gcc, node and the agents). RUN steps run as root at build time;
 # sessions run as your uid.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-# RUN dnf -y install golang && dnf clean all
+# %s
 `
+
+// scaffoldConfig returns the config.toml init writes: configTemplate, with
+// the base key set if base is not empty.
+func scaffoldConfig(base string) string {
+	if base == "" {
+		return configTemplate
+	}
+	line := strings.TrimPrefix(strings.Replace(baseTemplateLine, `"fedora:45"`, fmt.Sprintf("%-11q", base), 1), "# ")
+	return strings.Replace(configTemplate, baseTemplateLine, line, 1)
+}
+
+// scaffoldContainerfile returns the Containerfile init writes, with an
+// example in the base's package manager. An empty base is the default.
+func scaffoldContainerfile(base string) string {
+	if base == "" {
+		base = config.Bases[0]
+	}
+	name, example := "Fedora", "RUN dnf -y install golang && dnf clean all"
+	switch image.Distro(base) {
+	case "debian", "ubuntu":
+		name = map[string]string{"debian": "Debian", "ubuntu": "Ubuntu"}[image.Distro(base)]
+		example = "RUN apt-get update && apt-get install -y --no-install-recommends golang && rm -rf /var/lib/apt/lists/*"
+	case "alpine":
+		name, example = "Alpine", "RUN apk add --no-cache go"
+	}
+	return fmt.Sprintf(containerfileTemplate, name, example)
+}

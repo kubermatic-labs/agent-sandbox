@@ -96,6 +96,30 @@ func TestInitScaffoldsAndTrusts(t *testing.T) {
 	}
 }
 
+// init --base pins the base in config.toml and scaffolds a Containerfile
+// for its package manager. Building the other bases is left to manual
+// testing: each is a multi-minute build.
+func TestInitBase(t *testing.T) {
+	e := newProject(t, openNetwork)
+	if r := e.run(e.root, "", "init", "--base", "fedora:44"); r.code != 1 || !strings.Contains(r.stderr, "not one of") {
+		t.Fatalf("init --base fedora:44: exit %d, %q", r.code, r.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, ".agent-sandbox")); !os.IsNotExist(err) {
+		t.Fatalf("a refused init must not create .agent-sandbox: %v", err)
+	}
+	if r := e.run(e.root, "", "init", "--base", "alpine:3"); r.code != 0 {
+		t.Fatalf("init --base alpine:3: exit %d, %q", r.code, r.stderr)
+	}
+	cfg, err := os.ReadFile(filepath.Join(e.root, ".agent-sandbox", "config.toml"))
+	if err != nil || !strings.Contains(string(cfg), "\nbase          = \"alpine:3\"") {
+		t.Errorf("config.toml does not set base: %v\n%s", err, cfg)
+	}
+	cf, err := os.ReadFile(filepath.Join(e.root, ".agent-sandbox", "Containerfile"))
+	if err != nil || !strings.Contains(string(cf), "apk add") {
+		t.Errorf("Containerfile has no apk example: %v\n%s", err, cf)
+	}
+}
+
 func TestWorktreeListAndRm(t *testing.T) {
 	e := newWorktreeProject(t, "")
 	e.mustRun(e.root, "", "--", "sh", "-c", "echo x > f && git add f && git commit -qm work && echo y > untracked")

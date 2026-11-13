@@ -1,5 +1,5 @@
-# agent-sandbox base image (embedded in the binary; override with
-# ~/.config/agent-sandbox/base/Containerfile).
+# agent-sandbox base image "fedora:45" (embedded in the binary; override with
+# ~/.config/agent-sandbox/base/fedora/Containerfile).
 FROM registry.fedoraproject.org/fedora:45
 
 RUN dnf -y install --setopt=install_weak_deps=False \
@@ -19,6 +19,9 @@ RUN dnf -y install --setopt=install_weak_deps=False \
         ripgrep \
         which \
     && dnf clean all
+
+# The agents need Node.js >= 22.19.
+RUN node -e 'const [a, b] = process.versions.node.split(".").map(Number); if (a < 22 || (a === 22 && b < 19)) { console.error("node " + process.version + " is too old, the agents need >= 22.19"); process.exit(1) }'
 
 # The agents are baked into the image, installed globally and owned by root:
 # sessions run as an unprivileged user and cannot replace them. Self-update is

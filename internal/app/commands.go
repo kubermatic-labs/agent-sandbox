@@ -21,10 +21,14 @@ func Build(ctx context.Context, opts image.BuildOptions) error {
 	if err != nil {
 		return err
 	}
+	cfg, err := e.loadConfig(state)
+	if err != nil {
+		return err
+	}
 	if err := e.prepare(ctx); err != nil {
 		return err
 	}
-	_, err = e.ensureImages(ctx, state, opts, true)
+	_, err = e.ensureImages(ctx, state, cfg.Base, opts, true)
 	return err
 }
 

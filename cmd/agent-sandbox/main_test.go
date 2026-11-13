@@ -43,8 +43,8 @@ func (r *recorder) cmds() commands {
 			r.calls = append(r.calls, fmt.Sprintf("worktree rm %s force=%v delete=%v", name, force, del))
 			return r.err
 		},
-		scaffold: func(context.Context, io.Writer) error {
-			r.calls = append(r.calls, "init")
+		scaffold: func(_ context.Context, base string, _ io.Writer) error {
+			r.calls = append(r.calls, "init base="+base)
 			return r.err
 		},
 	}
@@ -157,7 +157,8 @@ func TestManagementCommands(t *testing.T) {
 		{[]string{"worktree", "list"}, "worktree list", 0},
 		{[]string{"worktree", "rm", "dev", "--force", "--delete-branch"}, "worktree rm dev force=true delete=true", 0},
 		{[]string{"worktree", "rm"}, "", 1},
-		{[]string{"init"}, "init", 0},
+		{[]string{"init"}, "init base=", 0},
+		{[]string{"init", "--base", "alpine:3"}, "init base=alpine:3", 0},
 		{[]string{"init", "x"}, "", 1},
 	} {
 		r := &recorder{}

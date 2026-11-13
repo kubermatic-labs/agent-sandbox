@@ -1,0 +1,45 @@
+# agent-sandbox base image "alpine:3" (embedded in the binary; override with
+# ~/.config/agent-sandbox/base/alpine/Containerfile).
+FROM docker.io/library/alpine:3
+
+# bash is the default session command (bash -l) and coreutils provides the
+# GNU cp the volume init uses. libgcc and libstdc++ are needed by the
+# agents' native binaries on musl.
+RUN apk add --no-cache \
+        bash \
+        ca-certificates \
+        coreutils \
+        curl \
+        fd \
+        gcc \
+        git \
+        github-cli \
+        jq \
+        less \
+        libgcc \
+        libstdc++ \
+        make \
+        musl-dev \
+        nodejs \
+        npm \
+        procps \
+        python3 \
+        ripgrep
+
+# The agents need Node.js >= 22.19.
+RUN node -e 'const [a, b] = process.versions.node.split(".").map(Number); if (a < 22 || (a === 22 && b < 19)) { console.error("node " + process.version + " is too old, the agents need >= 22.19"); process.exit(1) }'
+
+# The agents are baked into the image, installed globally and owned by root:
+# sessions run as an unprivileged user and cannot replace them. Self-update is
+# disabled as well, so agents do not try and fail on every start. Claude
+# Code's bundled ripgrep is glibc-only; it uses the system one instead.
+ENV DISABLE_AUTOUPDATER=1 \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    USE_BUILTIN_RIPGREP=0
+
+RUN npm install -g --no-fund --no-audit \
+        @anthropic-ai/claude-code \
+        @opencode/cli \
+        @earendil-works/pi-coding-agent && \
+    npm cache clean --force

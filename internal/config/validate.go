@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// Bases are the built-in base images (spec 3.3); the first is the default.
+var Bases = []string{"fedora:45", "debian:12", "ubuntu:26.04", "alpine:3"}
+
 var (
 	networks = []string{"restricted", "open", "allowlist"}
 	gitModes = []string{"ro", "worktree"}
@@ -97,6 +100,9 @@ func (f *file) validate(path string, env Env) error {
 		if v != nil && (strings.TrimSpace(*v) == "" || strings.ContainsAny(*v, "\n\x00")) {
 			bad(key, "must be a non-empty single line")
 		}
+	}
+	if f.Base != nil && !slices.Contains(Bases, *f.Base) {
+		bad("base", "%q is not one of %s", *f.Base, strings.Join(Bases, ", "))
 	}
 	if f.Command != nil && len(f.Command) == 0 {
 		bad("command", "must not be empty")

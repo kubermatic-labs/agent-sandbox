@@ -54,15 +54,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	// The project config is the host project root's (spec 3.1), as approved:
 	// read from the trust snapshot, never the live file, which the agent of
 	// a running sandbox may have changed since checkTrust (spec 3.4).
-	cfg, err := config.Load(p.GlobalConfig(), e.projectConfig(state), config.Env{
-		Home:        p.Home,
-		ConfigHome:  p.ConfigHome,
-		DataHome:    p.DataHome,
-		XDGRuntime:  p.XDGRuntime,
-		DataDir:     p.DataDir,
-		ProjectRoot: proj.Root,
-		PathDirs:    filepath.SplitList(os.Getenv("PATH")),
-	})
+	cfg, err := e.loadConfig(state)
 	if err != nil {
 		return 1, err
 	}
@@ -110,7 +102,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	im, err := e.ensureImages(ctx, state, image.BuildOptions{}, false)
+	im, err := e.ensureImages(ctx, state, cfg.Base, image.BuildOptions{}, false)
 	if err != nil {
 		return 1, err
 	}

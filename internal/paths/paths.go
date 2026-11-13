@@ -59,7 +59,8 @@ func (p Paths) GlobalConfig() string { return filepath.Join(p.ConfigDir, "config
 // SecretsFile is the env file passed to every sandbox.
 func (p Paths) SecretsFile() string { return filepath.Join(p.ConfigDir, "secrets.env") }
 
-// BaseOverrideDir is the optional base image build context.
+// BaseOverrideDir holds the optional base image build contexts, one
+// subdirectory per distro (see image.BaseContext).
 func (p Paths) BaseOverrideDir() string { return filepath.Join(p.ConfigDir, "base") }
 
 // HomeSeedDir is the optional seed copied into new home volumes.
