@@ -98,6 +98,10 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
    parallel invocations build each tag once.
 5. Take `flock` on `$XDG_RUNTIME_DIR/agent-sandbox/<container>.lock`.
 6. Find the container by labels:
+   - running with a different git mode, or a different (or no) `agent-sandbox.config` label: refuse and ask for
+     `podman stop <container>`. The label is a sha256 of the `podman run` argv without the labels and the image, so it
+     covers the network mode, `allow_cidrs`, `allow_domains`, `idle_timeout`, mounts and deny-list overlays,
+     resources and the secrets env file. A sandbox started under an older policy would not enforce the current one;
    - running with the same image ID and binary hash: use it;
    - running with a different image ID or binary hash: warn
      `sandbox runs an older image or agent-sandbox binary; 'agent-sandbox stop' to pick it up` and use it anyway;

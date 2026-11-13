@@ -336,3 +336,30 @@ func TestGitModeMismatchRefused(t *testing.T) {
 		t.Error("exec'd into a sandbox with the wrong git mode")
 	}
 }
+
+func TestConfigMismatchRefused(t *testing.T) {
+	for name, tt := range map[string]struct {
+		labels string
+		ok     bool
+	}{
+		"same config":      {`{"agent-sandbox.config":"h1"}`, true},
+		"different config": {`{"agent-sandbox.config":"h0"}`, false},
+		"no label":         {`{}`, false},
+	} {
+		w := &world{state: "running", labels: tt.labels}
+		s, f, _ := newSandbox(t, w)
+		s.ConfigHash = "h1"
+		_, err := s.Exec(context.Background(), execArgv)
+		if tt.ok != (err == nil) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if !tt.ok {
+			if err != nil && !strings.Contains(err.Error(), "different configuration") {
+				t.Errorf("%s: err = %v", name, err)
+			}
+			if len(sessionExecs(f)) != 0 || len(f.CallsWith("run")) != 0 {
+				t.Errorf("%s: used or replaced a sandbox with another config: %q", name, f.Calls())
+			}
+		}
+	}
+}

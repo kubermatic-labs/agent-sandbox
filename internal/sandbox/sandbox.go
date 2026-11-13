@@ -43,6 +43,9 @@ type Sandbox struct {
 	BinaryHash string
 	// GitMode must match the running container's: its mounts differ.
 	GitMode string
+	// ConfigHash (ConfigHash of the run input) must match the running
+	// container's ConfigLabel: otherwise it enforces an older policy.
+	ConfigHash string
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -88,6 +91,9 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 		if c.State == "running" {
 			if mode := c.Labels["agent-sandbox.git-mode"]; s.GitMode != "" && mode != s.GitMode {
 				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first", mode, s.GitMode, s.Container)
+			}
+			if s.ConfigHash != "" && c.Labels[ConfigLabel] != s.ConfigHash {
+				return fmt.Errorf("the running sandbox was started with a different configuration (network, mounts, readonly, resources, ...) and would not enforce the current one; 'podman stop %s' first", s.Container)
 			}
 			s.warnIfStale(c)
 			return nil

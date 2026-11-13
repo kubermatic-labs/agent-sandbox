@@ -45,6 +45,8 @@ agent-sandbox -n feature -- claude       # a second, independent sandbox of the 
 
 The first run builds the base image (Fedora with git, ripgrep, gcc, node and the three agents), which takes a few
 minutes. The sandbox keeps running between sessions and stops itself after `idle_timeout` (10 minutes) without one.
+If the config changes while it runs (network, mounts, `readonly`, resources, ...), new sessions are refused until you
+stop it, so a sandbox never enforces an older policy.
 
 | Command | |
 |---|---|

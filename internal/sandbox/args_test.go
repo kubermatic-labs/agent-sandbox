@@ -185,3 +185,51 @@ func TestProxyEnv(t *testing.T) {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
+
+func TestConfigHash(t *testing.T) {
+	p, cfg, plan := goldenPlan(t)
+	base := RunInput{
+		Container: project.ContainerName(p.ID, "default"),
+		Labels:    Labels(p, "default", "ro", "feedface", "beef"),
+		Hostname:  "asb-proj",
+		Resources: cfg.Resources,
+		Mounts:    plan.Mounts,
+		Image:     "img:1",
+		Command:   InitCommand(cfg, 1000),
+	}
+	h := ConfigHash(base)
+	if got := RunArgs(base); !slices.Contains(got, ConfigLabel+"="+h) {
+		t.Errorf("RunArgs lacks the %s label: %q", ConfigLabel, got)
+	}
+	same := map[string]func(*RunInput){
+		"image":  func(in *RunInput) { in.Image = "img:2" },
+		"labels": func(in *RunInput) { in.Labels = Labels(p, "default", "ro", "cafe", "f00d") },
+	}
+	for name, mod := range same {
+		in := base
+		mod(&in)
+		if ConfigHash(in) != h {
+			t.Errorf("%s changed the config hash; it is only stale", name)
+		}
+	}
+	open, allowCIDR := cfg, cfg
+	open.Network = "open"
+	allowCIDR.AllowCIDRs = []string{"10.0.0.0/8"}
+	differ := map[string]func(*RunInput){
+		"network":    func(in *RunInput) { in.Command = InitCommand(open, 1000) },
+		"allow_cidr": func(in *RunInput) { in.Command = InitCommand(allowCIDR, 1000) },
+		"mount": func(in *RunInput) {
+			in.Mounts = append(slices.Clone(in.Mounts), mounts.Mount{Src: "/home/u/.aws", Dst: "/x", RO: true})
+		},
+		"readonly":  func(in *RunInput) { in.Mounts = slices.Clone(in.Mounts[:len(in.Mounts)-1]) },
+		"resources": func(in *RunInput) { in.Resources.Memory = "1g" },
+		"env file":  func(in *RunInput) { in.EnvFile = "/s.env" },
+	}
+	for name, mod := range differ {
+		in := base
+		mod(&in)
+		if ConfigHash(in) == h {
+			t.Errorf("%s did not change the config hash", name)
+		}
+	}
+}

@@ -131,7 +131,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	if hasSecrets {
 		envFile = p.SecretsFile()
 	}
-	runArgv := sandbox.RunArgs(sandbox.RunInput{
+	runIn := sandbox.RunInput{
 		Container: container,
 		Labels:    sandbox.Labels(proj, o.Name, cfg.Git, im.imageID, binHash),
 		Hostname:  project.Hostname(proj.Root),
@@ -140,7 +140,8 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		EnvFile:   envFile,
 		Image:     im.tag,
 		Command:   sandbox.InitCommand(cfg, os.Getuid()),
-	})
+	}
+	runArgv := sandbox.RunArgs(runIn)
 
 	command := o.Cmd
 	if len(command) == 0 {
@@ -177,6 +178,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		ImageID:      im.imageID,
 		BinaryHash:   binHash,
 		GitMode:      cfg.Git,
+		ConfigHash:   sandbox.ConfigHash(runIn),
 	}
 	code, err := sb.Exec(ctx, execArgv)
 	if err != nil {

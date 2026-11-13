@@ -7,6 +7,8 @@ agent-sandbox=1
 --label
 agent-sandbox.binary=beef
 --label
+agent-sandbox.config=58222cc0dd14ccfa580511bc51fdd3fe189d1e0f475024da1b5805166e356022
+--label
 agent-sandbox.git-mode=worktree
 --label
 agent-sandbox.image-id=feedface

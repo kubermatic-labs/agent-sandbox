@@ -3,6 +3,8 @@
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"slices"
@@ -48,13 +50,41 @@ type RunInput struct {
 	Command   []string // PID 1
 }
 
-// RunArgs returns the podman run argv (spec 4.1). There is deliberately no
-// --rm: the wrapper removes exited containers itself after printing their
-// logs.
+// ConfigLabel records ConfigHash on the container.
+const ConfigLabel = "agent-sandbox.config"
+
+// ConfigHash identifies everything a running sandbox enforces: the podman
+// run argv without the labels and the image (network mode, allowed CIDRs and
+// domains, idle timeout, mounts and deny-list overlays, resources, env
+// file). A running sandbox with another hash was started under another
+// policy and must not be reused (spec 2.4). Image and binary changes are
+// only stale, see the image-id and binary labels.
+func ConfigHash(in RunInput) string {
+	in.Image = ""
+	h := sha256.New()
+	for _, a := range runArgs(in, nil) {
+		h.Write([]byte(a))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// RunArgs returns the podman run argv (spec 4.1), labelled with ConfigHash.
+// There is deliberately no --rm: the wrapper removes exited containers
+// itself after printing their logs.
 func RunArgs(in RunInput) []string {
+	labels := maps.Clone(in.Labels)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[ConfigLabel] = ConfigHash(in)
+	return runArgs(in, labels)
+}
+
+func runArgs(in RunInput, labels map[string]string) []string {
 	args := []string{"run", "-d", "--name", in.Container}
-	for _, k := range slices.Sorted(maps.Keys(in.Labels)) {
-		args = append(args, "--label", k+"="+in.Labels[k])
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		args = append(args, "--label", k+"="+labels[k])
 	}
 	args = append(args,
 		"--userns=keep-id", "--user", "0:0",
