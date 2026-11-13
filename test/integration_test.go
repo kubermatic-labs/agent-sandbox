@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration tests against real rootless podman. Run with `make integration`.
+// Integration tests against real rootless podman. Run with `just integration`.
 package test
 
 import (

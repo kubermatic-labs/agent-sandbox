@@ -13,14 +13,14 @@ agent: a change that weakens isolation is a bug even if the tests pass.
 
 ## Commands
 
-- `make build` builds `dist/agent-sandbox` with `CGO_ENABLED=0`. This is required: the binary is copied into the
+- `just build` builds `dist/agent-sandbox` with `CGO_ENABLED=0`. This is required: the binary is copied into the
   container, so do not add cgo code.
-- `make test` runs unit tests. Focused: `go test ./internal/mounts -run TestName`.
-- `make integration` needs real rootless podman (>= 5), the `nf_tables` module, and a base-image build on the first
-  run (network, minutes). It uses `-tags integration`; `make test` does not run it.
+- `just test` runs unit tests. Focused: `go test ./internal/mounts -run TestName`.
+- `just integration` needs real rootless podman (>= 5), the `nf_tables` module, and a base-image build on the first
+  run (network, minutes). It uses `-tags integration`; `just test` does not run it.
   Focused: `go test -tags integration ./test -run TestName`.
-- `make lint` is the gate: gofmt (must print nothing), `go vet` with and without the integration tag, golangci-lint v2.
-  There is no CI; run `make lint && make test`, plus integration tests when touching runtime or isolation.
+- `just lint` is the gate: gofmt (must print nothing), `go vet` with and without the integration tag, golangci-lint v2.
+  There is no CI; run `just lint && just test`, plus integration tests when touching runtime or isolation.
 - Golden files (`internal/sandbox/testdata`, `internal/initd/testdata`) are rewritten with
   `go test ./internal/sandbox ./internal/initd -update` (flag after the package list). Review the diff: these are the
   podman mount plan and nftables ruleset, both security-critical.

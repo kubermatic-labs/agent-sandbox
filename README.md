@@ -17,7 +17,7 @@ LAN by default, and optionally no exfiltration. The design and its reasoning are
 ## Install
 
 ```sh
-make build                       # CGO_ENABLED=0 go build -o dist/agent-sandbox ./cmd/agent-sandbox
+just build                       # CGO_ENABLED=0 go build -o dist/agent-sandbox ./cmd/agent-sandbox
 install -m 0755 dist/agent-sandbox ~/.local/bin/
 ln -s agent-sandbox ~/.local/bin/asb     # optional short name
 ```
@@ -167,9 +167,9 @@ agent-sandbox narrows what an agent can do; it does not make running one risk-fr
 ## Development
 
 ```sh
-make test          # unit tests
-make integration   # real rootless podman; each escape attempt must fail
-make lint
+just test          # unit tests
+just integration   # real rootless podman; each escape attempt must fail
+just lint
 ```
 
 The integration tests use `AGENT_SANDBOX_CONFIG_DIR` and `AGENT_SANDBOX_DATA_DIR` to keep their state out of yours;
