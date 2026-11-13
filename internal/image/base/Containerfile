@@ -16,6 +16,6 @@ ENV DISABLE_AUTOUPDATER=1 \
 
 RUN npm install -g --no-fund --no-audit \
         @anthropic-ai/claude-code \
-        opencode-ai \
+        @opencode/cli \
         @openai/codex \
     && npm cache clean --force
