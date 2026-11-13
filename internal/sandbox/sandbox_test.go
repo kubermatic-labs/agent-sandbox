@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
@@ -18,13 +19,15 @@ import (
 
 // world is a minimal stateful podman: one container, some volumes.
 type world struct {
-	mu        sync.Mutex
-	state     string // "", "running", "exited"
-	exitCode  int
-	volumes   map[string]bool
-	execCodes []int // successive exec results
-	vanish    bool  // the first exec finds the container gone
-	initFails bool
+	mu         sync.Mutex
+	state      string // "", "running", "exited"
+	exitCode   int
+	volumes    map[string]bool
+	execCodes  []int // successive exec results
+	vanish     bool  // the first exec finds the container gone
+	initFails  bool
+	readyAfter int  // ready probes that fail before the ready file appears
+	dieOnStart bool // _init fails: the container exits before ready
 }
 
 func (w *world) handle(args []string) podmantest.Result {
@@ -60,6 +63,16 @@ func (w *world) handle(args []string) podmantest.Result {
 		return podmantest.Result{}
 	case args[0] == "logs":
 		return podmantest.Result{Out: "nftables: operation not supported\n"}
+	case args[0] == "exec" && len(args) > 2 && args[2] == "test":
+		if w.dieOnStart {
+			w.state, w.exitCode = "exited", 1
+			return podmantest.Result{Code: 125}
+		}
+		if w.readyAfter > 0 {
+			w.readyAfter--
+			return podmantest.Result{Code: 1}
+		}
+		return podmantest.Result{}
 	case args[0] == "exec":
 		if w.vanish {
 			w.vanish, w.state = false, ""
@@ -98,6 +111,11 @@ func newSandbox(t *testing.T, w *world) (*Sandbox, *podmantest.Fake, *bytes.Buff
 }
 
 var execArgv = []string{"exec", "-i", "asb-x-default", "true"}
+
+// sessionExecs returns the exec calls that are sessions, not ready probes.
+func sessionExecs(f *podmantest.Fake) [][]string {
+	return f.CallsWith("exec", "-i")
+}
 
 func TestExecStartsMissingContainer(t *testing.T) {
 	w := &world{execCodes: []int{7}}
@@ -140,7 +158,7 @@ func TestExecReplacesExitedContainerAndPrintsLogs(t *testing.T) {
 	if !strings.Contains(log.String(), "exited with code 1") || !strings.Contains(log.String(), "nftables") {
 		t.Errorf("logs of the failed container not printed: %q", log.String())
 	}
-	if len(f.CallsWith("rm", "--force", "--ignore", "c1")) != 1 || len(f.CallsWith("run", "-d")) != 1 {
+	if len(f.CallsWith("rm", "--force", "--time", "0", "--ignore", "c1")) != 1 || len(f.CallsWith("run", "-d")) != 1 {
 		t.Errorf("exited container not replaced: %q", f.Calls())
 	}
 }
@@ -163,7 +181,7 @@ func TestExecRetriesOnceWhenContainerVanished(t *testing.T) {
 	if err != nil || code != 3 {
 		t.Fatalf("Exec = %d, %v; want 3 from the retry", code, err)
 	}
-	if n := len(f.CallsWith("exec")); n != 2 {
+	if n := len(sessionExecs(f)); n != 2 {
 		t.Errorf("exec calls = %d, want 2", n)
 	}
 	if !strings.Contains(log.String(), "starting it again") {
@@ -178,7 +196,7 @@ func TestExecNoRetryWhenContainerStillRuns(t *testing.T) {
 	if err != nil || code != 125 {
 		t.Fatalf("Exec = %d, %v; want 125", code, err)
 	}
-	if n := len(f.CallsWith("exec")); n != 1 {
+	if n := len(sessionExecs(f)); n != 1 {
 		t.Errorf("exec calls = %d, want 1", n)
 	}
 }
@@ -231,5 +249,48 @@ func TestHomeSeedIsStagedAndCleanedUp(t *testing.T) {
 		if strings.Contains(a, "/seed") {
 			t.Errorf("cache volume got the home seed: %q", inits[1])
 		}
+	}
+}
+
+func TestReadyWaitPolls(t *testing.T) {
+	w := &world{readyAfter: 3}
+	s, f, _ := newSandbox(t, w)
+	s.ReadyPoll = time.Millisecond
+	if _, err := s.Exec(context.Background(), execArgv); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.CallsWith("exec", "asb-x-default", "test", "-e", "/run/asb/ready")); n != 4 {
+		t.Errorf("ready probes = %d, want 4", n)
+	}
+}
+
+func TestStartupFailurePrintsLogsAndRemoves(t *testing.T) {
+	w := &world{dieOnStart: true}
+	s, f, log := newSandbox(t, w)
+	_, err := s.Exec(context.Background(), execArgv)
+	if err == nil || !strings.Contains(err.Error(), "exited during startup") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(log.String(), "nftables") {
+		t.Errorf("logs not printed: %q", log.String())
+	}
+	if len(f.CallsWith("rm")) != 1 {
+		t.Error("failed container not removed")
+	}
+	if len(sessionExecs(f)) != 0 {
+		t.Error("session started in a container whose setup failed")
+	}
+}
+
+func TestReadyTimeout(t *testing.T) {
+	w := &world{readyAfter: 1 << 30}
+	s, f, _ := newSandbox(t, w)
+	s.ReadyTimeout, s.ReadyPoll = 30*time.Millisecond, time.Millisecond
+	_, err := s.Exec(context.Background(), execArgv)
+	if err == nil || !strings.Contains(err.Error(), "did not become ready") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.CallsWith("rm")) != 1 || len(sessionExecs(f)) != 0 {
+		t.Errorf("calls = %q", f.Calls())
 	}
 }

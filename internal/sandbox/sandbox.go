@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"k8c.io/agent-sandbox/internal/flock"
+	"k8c.io/agent-sandbox/internal/initd"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
 )
@@ -31,6 +33,9 @@ type Sandbox struct {
 	UID, GID     int
 	SeedDir      string // home seed; ignored if missing
 	TmpDir       string // where the seed copy is staged
+
+	ReadyTimeout time.Duration // default 10s
+	ReadyPoll    time.Duration // default 100ms
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -94,7 +99,59 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 	if _, err := s.Podman.R.Output(ctx, s.RunArgv...); err != nil {
 		return fmt.Errorf("starting the sandbox: %w", err)
 	}
-	return nil
+	return s.waitReady(ctx)
+}
+
+// waitReady polls for _init's ready file. If the container exits first or
+// the file does not appear in time, it prints the logs and removes the
+// container: a sandbox whose setup failed is never used.
+func (s *Sandbox) waitReady(ctx context.Context) error {
+	timeout, poll := s.ReadyTimeout, s.ReadyPoll
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	if poll == 0 {
+		poll = 100 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := s.Podman.R.Output(ctx, "exec", s.Container, "test", "-e", initd.ReadyFile)
+		if err == nil {
+			return nil
+		}
+		var ee *podman.ExitError
+		if !errors.As(err, &ee) {
+			return err
+		}
+		if ee.Code != 1 { // not just "no file yet": is the container still there?
+			running, err := s.running(ctx)
+			if err != nil {
+				return err
+			}
+			if !running {
+				return s.failStart(ctx, "the sandbox exited during startup")
+			}
+		}
+		if time.Now().After(deadline) {
+			return s.failStart(ctx, fmt.Sprintf("the sandbox did not become ready within %v", timeout))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
+func (s *Sandbox) failStart(ctx context.Context, msg string) error {
+	fmt.Fprintf(s.Log, "agent-sandbox: %s; its logs:\n", msg)
+	if err := s.Podman.Logs(ctx, s.Container, s.Log); err != nil {
+		fmt.Fprintf(s.Log, "agent-sandbox: reading logs: %v\n", err)
+	}
+	if err := s.Podman.Remove(ctx, s.Container); err != nil {
+		fmt.Fprintf(s.Log, "agent-sandbox: removing the failed sandbox: %v\n", err)
+	}
+	return errors.New(msg)
 }
 
 func (s *Sandbox) running(ctx context.Context) (bool, error) {

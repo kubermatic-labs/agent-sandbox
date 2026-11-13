@@ -132,7 +132,7 @@ func TestClientCommands(t *testing.T) {
 		{"image", "inspect", "--format", "{{.Id}}", "img"},
 		{"ps", "--all", "--format", "json", "--filter", "label=a=1", "--filter", "label=b=2"},
 		{"volume", "create", "--label", "a=2", "--label", "z=1", "vol"},
-		{"rm", "--force", "--ignore", "abc"},
+		{"rm", "--force", "--time", "0", "--ignore", "abc"},
 	}
 	if diff := cmp.Diff(wantCalls, f.Calls()); diff != "" {
 		t.Errorf("calls (-want +got):\n%s", diff)

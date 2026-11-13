@@ -3,10 +3,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -20,6 +17,7 @@ import (
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
 	"k8c.io/agent-sandbox/internal/sandbox"
+	"k8c.io/agent-sandbox/internal/selfbin"
 )
 
 // RunOptions are the main command's arguments.
@@ -90,11 +88,15 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	plan, err := mounts.Build(mounts.Input{Root: proj.Root, HasGit: proj.HasGit, ID: proj.ID, Home: p.Home, Config: cfg})
+	exe, err := executable()
 	if err != nil {
 		return 1, err
 	}
-	binHash, err := binaryHash()
+	binPath, binHash, err := selfbin.Stage(exe, p.DataDir)
+	if err != nil {
+		return 1, fmt.Errorf("staging the agent-sandbox binary: %w", err)
+	}
+	plan, err := mounts.Build(mounts.Input{Root: proj.Root, HasGit: proj.HasGit, ID: proj.ID, Home: p.Home, Binary: binPath, Config: cfg})
 	if err != nil {
 		return 1, err
 	}
@@ -112,7 +114,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		Mounts:    plan.Mounts,
 		EnvFile:   envFile,
 		Image:     tag,
-		Command:   []string{"sleep", "infinity"}, // replaced by _init in milestone 2
+		Command:   sandbox.InitCommand(cfg, os.Getuid()),
 	})
 
 	command := o.Cmd
@@ -176,24 +178,11 @@ func checkPodman(ctx context.Context, pm podman.Client) error {
 	return podman.CheckVersion(v)
 }
 
-// binaryHash is the sha256 of the running binary, used for stale detection.
-func binaryHash() (string, error) {
+// executable is the running binary with symlinks (such as asb) resolved.
+func executable() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(exe)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return filepath.EvalSymlinks(exe)
 }

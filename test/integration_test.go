@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"k8c.io/agent-sandbox/internal/project"
 )
@@ -250,5 +251,86 @@ func TestCacheVolumesWritable(t *testing.T) {
 	got := e.mustRun(e.root, "", "--", "sh", "-c", "touch $GOCACHE/x $GOMODCACHE/x && echo $GOCACHE $GOMODCACHE")
 	if got != "/cache/go-build /cache/go-mod\n" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// container returns the ID and state of the project's default sandbox.
+func (e *sandboxEnv) container() (id, state string) {
+	e.t.Helper()
+	out, err := exec.Command("podman", "ps", "-a", "--format", "{{.ID}} {{.State}}",
+		"--filter", "label=agent-sandbox.project-id="+e.id, "--filter", "label=agent-sandbox.name=default").Output()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	id, state, _ = strings.Cut(strings.TrimSpace(string(out)), " ")
+	return id, state
+}
+
+func TestInitIsUnprivileged(t *testing.T) {
+	e := newProject(t, openNetwork)
+	got := e.mustRun(e.root, "", "--", "sh", "-c",
+		`grep -E '^(Uid|Gid|Groups|CapInh|CapPrm|CapEff|CapAmb|NoNewPrivs):' /proc/1/status; tr '\0' ' ' < /proc/1/cmdline`)
+	want := "Uid:\t65534\t65534\t65534\t65534\n" +
+		"Gid:\t65534\t65534\t65534\t65534\n" +
+		"Groups:\t \n" +
+		"CapInh:\t0000000000000000\n" +
+		"CapPrm:\t0000000000000000\n" +
+		"CapEff:\t0000000000000000\n" +
+		"CapAmb:\t0000000000000000\n" +
+		"NoNewPrivs:\t1\n" +
+		fmt.Sprintf("/usr/local/bin/agent-sandbox _init --network=open --idle=10m0s --uid=%d ", os.Getuid())
+	if got != want {
+		t.Errorf("PID 1:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestSessionCannotKillInit(t *testing.T) {
+	e := newProject(t, openNetwork)
+	e.mustRun(e.root, "", "--", "true")
+	before, _ := e.container()
+	if r := e.run(e.root, "", "--", "sh", "-c", "kill -9 1 || kill -TERM 1 || exit 1"); r.code == 0 {
+		t.Error("signalling PID 1 succeeded")
+	}
+	e.mustRun(e.root, "", "--", "true")
+	if after, state := e.container(); after != before || state != "running" {
+		t.Errorf("sandbox changed: %s -> %s (%s)", before, after, state)
+	}
+}
+
+func TestIdleTimeoutStopsContainer(t *testing.T) {
+	e := newProject(t, openNetwork+"idle_timeout = \"6s\"\n")
+	e.mustRun(e.root, "", "--", "true")
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		_, state := e.container()
+		if state == "exited" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sandbox still %q after idle timeout", state)
+		}
+		time.Sleep(time.Second)
+	}
+	out, _ := exec.Command("podman", "ps", "-a", "--format", "{{.ExitCode}}", "--filter", "label=agent-sandbox.project-id="+e.id).Output()
+	if strings.TrimSpace(string(out)) != "0" {
+		t.Errorf("idle exit code = %q, want 0", out)
+	}
+	// The next run replaces the exited container silently.
+	r := e.run(e.root, "", "--", "true")
+	if r.code != 0 || r.stderr != "" {
+		t.Errorf("restart after idle: exit %d, stderr %q", r.code, r.stderr)
+	}
+}
+
+func TestStopIsPrompt(t *testing.T) {
+	e := newProject(t, openNetwork)
+	e.mustRun(e.root, "", "--", "true")
+	id, _ := e.container()
+	start := time.Now()
+	if out, err := exec.Command("podman", "stop", "-t", "10", id).CombinedOutput(); err != nil {
+		t.Fatalf("podman stop: %v\n%s", err, out)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("stop took %v; _init must exit promptly on SIGTERM", d)
 	}
 }

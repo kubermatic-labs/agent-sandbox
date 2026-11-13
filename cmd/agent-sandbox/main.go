@@ -12,6 +12,7 @@ import (
 
 	"k8c.io/agent-sandbox/internal/app"
 	"k8c.io/agent-sandbox/internal/image"
+	"k8c.io/agent-sandbox/internal/initd"
 )
 
 type (
@@ -64,8 +65,27 @@ func newRootCmd(code *int, runFn runFunc, buildFn buildFunc) *cobra.Command {
 		},
 	}
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
-	root.AddCommand(newBuildCmd(buildFn))
+	root.AddCommand(newBuildCmd(buildFn), newInitCmd(code))
 	return root
+}
+
+// newInitCmd is the container's PID 1 (spec 4.2). Hidden: users never run it.
+func newInitCmd(code *int) *cobra.Command {
+	var o initd.Options
+	cmd := &cobra.Command{
+		Use:    "_init",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			*code = initd.Main(o, cmd.ErrOrStderr())
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&o.Network, "network", "", "network mode")
+	cmd.Flags().DurationVar(&o.Idle, "idle", 0, "exit after this long without a session")
+	cmd.Flags().IntVar(&o.UID, "uid", 0, "host uid the sessions run as")
+	cmd.Flags().StringArrayVar(&o.AllowCIDRs, "allow-cidr", nil, "extra reachable CIDR (restricted mode)")
+	return cmd
 }
 
 func newBuildCmd(buildFn buildFunc) *cobra.Command {

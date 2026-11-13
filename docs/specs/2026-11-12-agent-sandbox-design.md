@@ -264,7 +264,7 @@ podman run -d
   --network pasta
   -v <project root | worktree>:<same path>:z           # see 4.4 / section 5 for the full mount plan
   -v <read-only overlays>...:ro
-  -v <agent-sandbox binary>:/usr/local/bin/agent-sandbox:ro
+  -v <staged agent-sandbox binary>:/usr/local/bin/agent-sandbox:ro,z
   -v asb-<project-id>-home:$HOME
   -v asb-<project-id>-<cache>:/cache/...
   --env-file ~/.config/agent-sandbox/secrets.env
@@ -276,8 +276,12 @@ podman run -d
 - Podman sorts mounts by destination, so the home volume at `$HOME` is mounted before the project and worktree
   mounts nested under it.
 - `--user 0:0` with keep-id is container root, which maps to a subuid and never to host root.
-- The binary mounted into the container is the running binary (`os.Executable()`, symlinks resolved). It must be
-  built with `CGO_ENABLED=0`.
+- The binary mounted into the container is a copy of the running binary (`os.Executable()`, symlinks resolved),
+  staged at `~/.local/share/agent-sandbox/bin/<sha256[:16]>/agent-sandbox` and mounted `:ro,z`. The container cannot
+  execute a `user_home_t` binary (it dies with SIGSEGV, verified), and relabeling the original in place would fail
+  for root-owned installs such as `/usr/local/bin`. The copy is content-addressed, so a running sandbox keeps the
+  binary it started with; copies of other versions older than a day are pruned. It must be built with
+  `CGO_ENABLED=0`.
 - SELinux stays enforcing. The project or worktree, the main `.git` in worktree mode, and extra `mounts` get `:z`
   (a one-time relabel to `container_file_t`). Read-only overlay mounts of paths already under a `:z` mount do not need
   their own relabel. Section 3.1 lists the refused mount sources.
@@ -291,8 +295,10 @@ podman run -d
    network mode via netlink (`github.com/google/nftables`). The image does not need `nft`.
 2. In allowlist mode, start the proxy child (`agent-sandbox _proxy`) as uid/gid 65533.
 3. Create `/run/asb/ready`.
-4. Drop privileges permanently: setgroups([]), setresgid/setresuid to 65534, clear every capability set including
-   bounding and ambient where possible, and set `PR_SET_NO_NEW_PRIVS`. The agent's UID then cannot signal it, kill it,
+4. Drop privileges permanently: setgroups([]), setresgid/setresuid to 65534, clear the permitted, effective,
+   inheritable and ambient capability sets on every thread, set `PR_SET_NO_NEW_PRIVS`, then verify the result in
+   `/proc/self/status` and exit non-zero on any mismatch. The bounding set stays: dropping from it needs
+   `CAP_SETPCAP`, which the container does not grant, and PID 1 never execs afterwards. The agent's UID then cannot signal it, kill it,
    or change the rules. PID 1 and the proxy use different UIDs, so a compromised proxy cannot signal PID 1 either.
 5. Supervise:
    - reap zombies (PID 1 duty);

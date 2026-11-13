@@ -42,12 +42,16 @@ type Volume struct {
 	Home bool // the home volume, which receives the home seed
 }
 
+// BinaryPath is where the agent-sandbox binary is mounted in the container.
+const BinaryPath = "/usr/local/bin/agent-sandbox"
+
 // Input is everything the plan depends on.
 type Input struct {
 	Root   string // project root, real path
 	HasGit bool   // <Root>/.git exists
 	ID     string // project ID
 	Home   string // $HOME, also the home volume mount point
+	Binary string // staged agent-sandbox binary (selfbin.Stage)
 	Config config.Config
 }
 
@@ -78,6 +82,10 @@ func Build(in Input) (Plan, error) {
 	for _, m := range in.Config.Mounts {
 		p.Mounts = append(p.Mounts, Mount{Src: m.Src, Dst: m.Dst, RO: m.RO, Relabel: true})
 	}
+	if in.Binary == "" {
+		return Plan{}, fmt.Errorf("no agent-sandbox binary to mount")
+	}
+	p.Mounts = append(p.Mounts, Mount{Src: in.Binary, Dst: BinaryPath, RO: true, Relabel: true})
 
 	home := VolumeName(in.ID, "home")
 	p.Volumes = append(p.Volumes, Volume{Name: home, Home: true})

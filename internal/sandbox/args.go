@@ -76,6 +76,20 @@ func RunArgs(in RunInput) []string {
 	return append(args, in.Command...)
 }
 
+// InitCommand is the container's PID 1: agent-sandbox _init (spec 4.2).
+func InitCommand(cfg config.Config, uid int) []string {
+	cmd := []string{
+		mounts.BinaryPath, "_init",
+		"--network=" + cfg.Network,
+		"--idle=" + cfg.IdleTimeout.String(),
+		"--uid=" + strconv.Itoa(uid),
+	}
+	for _, c := range cfg.AllowCIDRs {
+		cmd = append(cmd, "--allow-cidr="+c)
+	}
+	return cmd
+}
+
 // ExecInput is everything podman exec needs.
 type ExecInput struct {
 	Container string

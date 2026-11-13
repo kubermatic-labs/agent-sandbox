@@ -26,7 +26,7 @@ func TestBuildRO(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Caches = []string{"go", "npm"}
 	cfg.Mounts = []config.Mount{{Src: "/home/u/data/kind.yaml", Dst: "/home/u/.kube/config", RO: true}}
-	p, err := Build(Input{Root: "/home/u/src/proj", HasGit: true, ID: "proj-1a2b3c4d", Home: "/home/u", Config: cfg})
+	p, err := Build(Input{Root: "/home/u/src/proj", HasGit: true, ID: "proj-1a2b3c4d", Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123/agent-sandbox", Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,7 @@ func TestBuildRO(t *testing.T) {
 			{Src: "/home/u/src/proj", Dst: "/home/u/src/proj", Relabel: true},
 			{Src: "/home/u/src/proj/.git", Dst: "/home/u/src/proj/.git", RO: true},
 			{Src: "/home/u/data/kind.yaml", Dst: "/home/u/.kube/config", RO: true, Relabel: true},
+			{Src: "/home/u/.local/share/agent-sandbox/bin/0123/agent-sandbox", Dst: "/usr/local/bin/agent-sandbox", RO: true, Relabel: true},
 			{Src: "asb-proj-1a2b3c4d-home", Dst: "/home/u", Volume: true},
 			{Src: "asb-proj-1a2b3c4d-go-mod", Dst: "/cache/go-mod", Volume: true},
 			{Src: "asb-proj-1a2b3c4d-go-build", Dst: "/cache/go-build", Volume: true},
@@ -54,7 +55,7 @@ func TestBuildRO(t *testing.T) {
 }
 
 func TestBuildWithoutGit(t *testing.T) {
-	p, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Config: config.Defaults()})
+	p, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Binary: "/b", Config: config.Defaults()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,13 @@ func TestBuildWithoutGit(t *testing.T) {
 func TestBuildRefusesWorktree(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Git = "worktree"
-	if _, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Config: cfg}); err == nil {
+	if _, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Binary: "/b", Config: cfg}); err == nil {
 		t.Error("worktree mode must be refused until implemented")
+	}
+}
+
+func TestBuildRequiresBinary(t *testing.T) {
+	if _, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Config: config.Defaults()}); err == nil {
+		t.Error("a plan without the binary mount must be refused")
 	}
 }

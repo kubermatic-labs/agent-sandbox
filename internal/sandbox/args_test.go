@@ -42,7 +42,7 @@ func goldenPlan(t *testing.T) (project.Project, config.Config, mounts.Plan) {
 	cfg := config.Defaults()
 	cfg.Caches = []string{"go"}
 	cfg.Env = map[string]string{"FOO": "bar", "A": "b"}
-	plan, err := mounts.Build(mounts.Input{Root: p.Root, HasGit: p.HasGit, ID: p.ID, Home: "/home/u", Config: cfg})
+	plan, err := mounts.Build(mounts.Input{Root: p.Root, HasGit: p.HasGit, ID: p.ID, Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123456789abcdef/agent-sandbox", Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestRunArgsGoldenRO(t *testing.T) {
 		Mounts:    plan.Mounts,
 		EnvFile:   "/home/u/.config/agent-sandbox/secrets.env",
 		Image:     "localhost/agent-sandbox-base:0123456789abcdef",
-		Command:   []string{"sleep", "infinity"},
+		Command:   InitCommand(cfg, 1000),
 	}))
 }
 
@@ -104,5 +104,16 @@ func TestVolumeInitArgs(t *testing.T) {
 		"sh", "-c", "cp -R --preserve=mode,timestamps /seed/. /v/ && touch /v/.agent-sandbox-volume")
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("seed (-want +got):\n%s", diff)
+	}
+}
+
+func TestInitCommand(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Network = "restricted"
+	cfg.AllowCIDRs = []string{"10.0.0.1", "192.168.1.0/24"}
+	want := []string{"/usr/local/bin/agent-sandbox", "_init", "--network=restricted", "--idle=10m0s", "--uid=1000",
+		"--allow-cidr=10.0.0.1", "--allow-cidr=192.168.1.0/24"}
+	if diff := cmp.Diff(want, InitCommand(cfg, 1000)); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
 	}
 }

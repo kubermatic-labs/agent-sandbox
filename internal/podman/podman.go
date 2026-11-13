@@ -203,9 +203,10 @@ func (c Client) ListContainers(ctx context.Context, labels map[string]string) ([
 	return cs, nil
 }
 
-// Remove force-removes a container; a missing container is not an error.
+// Remove force-removes a container without waiting for it to stop; a missing
+// container is not an error.
 func (c Client) Remove(ctx context.Context, nameOrID string) error {
-	_, err := c.R.Output(ctx, "rm", "--force", "--ignore", nameOrID)
+	_, err := c.R.Output(ctx, "rm", "--force", "--time", "0", "--ignore", nameOrID)
 	return err
 }
 

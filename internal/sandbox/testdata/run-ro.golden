@@ -38,6 +38,8 @@ pasta
 -v
 /home/u/src/proj/.git:/home/u/src/proj/.git:ro
 -v
+/home/u/.local/share/agent-sandbox/bin/0123456789abcdef/agent-sandbox:/usr/local/bin/agent-sandbox:ro,z
+-v
 asb-proj-1a2b3c4d-home:/home/u
 -v
 asb-proj-1a2b3c4d-go-mod:/cache/go-mod
@@ -46,5 +48,8 @@ asb-proj-1a2b3c4d-go-build:/cache/go-build
 --env-file
 /home/u/.config/agent-sandbox/secrets.env
 localhost/agent-sandbox-base:0123456789abcdef
-sleep
-infinity
+/usr/local/bin/agent-sandbox
+_init
+--network=restricted
+--idle=10m0s
+--uid=1000
