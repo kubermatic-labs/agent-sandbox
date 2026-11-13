@@ -16,8 +16,18 @@ import (
 type recorder struct {
 	runs   []app.RunOptions
 	builds []image.BuildOptions
+	trusts int
 	code   int
 	err    error
+}
+
+func (r *recorder) cmds() commands {
+	return commands{run: r.run, build: r.build, trust: r.trust}
+}
+
+func (r *recorder) trust(context.Context) error {
+	r.trusts++
+	return r.err
 }
 
 func (r *recorder) run(_ context.Context, o app.RunOptions) (int, error) {
@@ -44,7 +54,7 @@ func TestArgs(t *testing.T) {
 	for _, tt := range tests {
 		r := &recorder{}
 		var stderr bytes.Buffer
-		if code := run(tt.args, &stderr, r.run, r.build); code != 0 {
+		if code := run(tt.args, &stderr, r.cmds()); code != 0 {
 			t.Errorf("%q: exit %d: %s", tt.args, code, stderr.String())
 			continue
 		}
@@ -61,7 +71,7 @@ func TestArgs(t *testing.T) {
 func TestUnknownPositionalIsError(t *testing.T) {
 	r := &recorder{}
 	var stderr bytes.Buffer
-	if code := run([]string{"claude"}, &stderr, r.run, r.build); code != 1 {
+	if code := run([]string{"claude"}, &stderr, r.cmds()); code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
 	if len(r.runs) != 0 || !strings.Contains(stderr.String(), "put the command after --") {
@@ -71,25 +81,35 @@ func TestUnknownPositionalIsError(t *testing.T) {
 
 func TestExitCodePassthrough(t *testing.T) {
 	r := &recorder{code: 42}
-	if code := run([]string{"--", "false"}, &bytes.Buffer{}, r.run, r.build); code != 42 {
+	if code := run([]string{"--", "false"}, &bytes.Buffer{}, r.cmds()); code != 42 {
 		t.Errorf("exit %d, want 42", code)
 	}
 	r = &recorder{err: errors.New("boom")}
 	var stderr bytes.Buffer
-	if code := run(nil, &stderr, r.run, r.build); code != 1 || !strings.Contains(stderr.String(), "agent-sandbox: boom") {
+	if code := run(nil, &stderr, r.cmds()); code != 1 || !strings.Contains(stderr.String(), "agent-sandbox: boom") {
 		t.Errorf("exit %d, stderr %q", code, stderr.String())
 	}
 }
 
 func TestBuild(t *testing.T) {
 	r := &recorder{}
-	if code := run([]string{"build", "--pull"}, &bytes.Buffer{}, r.run, r.build); code != 0 {
+	if code := run([]string{"build", "--pull"}, &bytes.Buffer{}, r.cmds()); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if diff := cmp.Diff([]image.BuildOptions{{Pull: true}}, r.builds); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
-	if code := run([]string{"build", "extra"}, &bytes.Buffer{}, r.run, r.build); code != 1 {
+	if code := run([]string{"build", "extra"}, &bytes.Buffer{}, r.cmds()); code != 1 {
 		t.Errorf("build with args: exit %d, want 1", code)
+	}
+}
+
+func TestTrust(t *testing.T) {
+	r := &recorder{}
+	if code := run([]string{"trust"}, &bytes.Buffer{}, r.cmds()); code != 0 || r.trusts != 1 || len(r.runs) != 0 {
+		t.Errorf("exit %d, trusts %d, runs %d", code, r.trusts, len(r.runs))
+	}
+	if code := run([]string{"trust", "now"}, &bytes.Buffer{}, r.cmds()); code != 1 {
+		t.Errorf("trust with args: exit %d", code)
 	}
 }

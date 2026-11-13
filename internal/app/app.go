@@ -1,181 +1,143 @@
-// Package app wires the packages together into the CLI's main flow (spec 2.4).
+// Package app wires the packages together into the CLI's commands (spec 2.3, 2.4).
 package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/term"
 
-	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/fspath"
 	"k8c.io/agent-sandbox/internal/image"
-	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/paths"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
-	"k8c.io/agent-sandbox/internal/sandbox"
-	"k8c.io/agent-sandbox/internal/selfbin"
+	"k8c.io/agent-sandbox/internal/trust"
 )
 
-// RunOptions are the main command's arguments.
-type RunOptions struct {
-	Name string
-	Cmd  []string // after --; empty means config command or bash -l
+// env is the resolved host context shared by the commands.
+type env struct {
+	paths paths.Paths
+	cwd   string
+	proj  project.Project
+	pm    podman.Client
 }
 
-// Run is the main entry: ensure image, ensure running, exec. It returns the
-// session's exit code.
-func Run(ctx context.Context, o RunOptions) (int, error) {
-	if err := project.ValidateName(o.Name); err != nil {
-		return 1, err
-	}
+// resolve finds the paths and the project for the current directory.
+func resolve() (*env, error) {
 	p, err := paths.FromEnv(os.Getenv)
 	if err != nil {
-		return 1, err
+		return nil, err
 	}
 	wd, err := os.Getwd()
 	if err != nil {
-		return 1, err
+		return nil, err
 	}
 	cwd, err := filepath.EvalSymlinks(wd)
 	if err != nil {
-		return 1, err
+		return nil, err
 	}
 	proj := project.Resolve(cwd)
 	protected := []string{p.ConfigDir, p.DataDir, p.XDGRuntime, filepath.Join(p.Home, ".ssh"), filepath.Join(p.Home, ".gnupg")}
 	if err := project.CheckRoot(proj.Root, fspath.Real(p.Home), protected); err != nil {
-		return 1, err
+		return nil, err
 	}
-
-	// Config is always read from the host project root (spec 3.1).
-	cfg, err := config.Load(p.GlobalConfig(), filepath.Join(proj.Root, ".agent-sandbox", "config.toml"), config.Env{
-		Home:        p.Home,
-		ConfigHome:  p.ConfigHome,
-		DataHome:    p.DataHome,
-		XDGRuntime:  p.XDGRuntime,
-		DataDir:     p.DataDir,
-		ProjectRoot: proj.Root,
-		PathDirs:    filepath.SplitList(os.Getenv("PATH")),
-	})
-	if err != nil {
-		return 1, err
-	}
-	// Fail closed: never run with less isolation than the config asks for.
-	if cfg.Network == "allowlist" {
-		return 1, fmt.Errorf("network mode %q is not implemented in this build yet; set network = \"open\" in %s to use it", cfg.Network, p.GlobalConfig())
-	}
-
-	pm := podman.Client{R: podman.CLI{}}
-	if err := checkPodman(ctx, pm); err != nil {
-		return 1, err
-	}
-	hasSecrets, err := config.CheckSecrets(p.SecretsFile())
-	if err != nil {
-		return 1, err
-	}
-	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
-		return 1, err
-	}
-
-	tag, err := image.EnsureBase(ctx, pm, p.BaseOverrideDir(), p.RuntimeDir, image.BuildOptions{}, false, os.Stderr)
-	if err != nil {
-		return 1, err
-	}
-	imageID, err := pm.ImageID(ctx, tag)
-	if err != nil {
-		return 1, err
-	}
-	exe, err := executable()
-	if err != nil {
-		return 1, err
-	}
-	binPath, binHash, err := selfbin.Stage(exe, p.DataDir)
-	if err != nil {
-		return 1, fmt.Errorf("staging the agent-sandbox binary: %w", err)
-	}
-	plan, err := mounts.Build(mounts.Input{Root: proj.Root, HasGit: proj.HasGit, ID: proj.ID, Home: p.Home, Binary: binPath, Config: cfg})
-	if err != nil {
-		return 1, err
-	}
-
-	container := project.ContainerName(proj.ID, o.Name)
-	envFile := ""
-	if hasSecrets {
-		envFile = p.SecretsFile()
-	}
-	runArgv := sandbox.RunArgs(sandbox.RunInput{
-		Container: container,
-		Labels:    sandbox.Labels(proj, o.Name, cfg.Git, imageID, binHash),
-		Hostname:  project.Hostname(proj.Root),
-		Resources: cfg.Resources,
-		Mounts:    plan.Mounts,
-		EnvFile:   envFile,
-		Image:     tag,
-		Command:   sandbox.InitCommand(cfg, os.Getuid()),
-	})
-
-	command := o.Cmd
-	if len(command) == 0 {
-		command = cfg.Command
-	}
-	if len(command) == 0 {
-		command = []string{"bash", "-l"}
-	}
-	execArgv := sandbox.ExecArgs(sandbox.ExecInput{
-		Container: container,
-		UID:       os.Getuid(),
-		GID:       os.Getgid(),
-		Workdir:   project.MapWorkdir(cwd, proj.Root, proj.Root),
-		TTY:       term.IsTerminal(int(os.Stdin.Fd())),
-		Env:       sandbox.SessionEnv(cfg.Env, plan.Env),
-		Cmd:       command,
-	})
-
-	sb := &sandbox.Sandbox{
-		Podman:       pm,
-		Stdio:        podman.Stdio{In: os.Stdin, Out: os.Stdout, Err: os.Stderr},
-		Log:          os.Stderr,
-		Container:    container,
-		Lookup:       sandbox.Lookup(proj.ID, o.Name),
-		RunArgv:      runArgv,
-		LockDir:      p.RuntimeDir,
-		Volumes:      plan.Volumes,
-		VolumeLabels: sandbox.VolumeLabels(proj.ID),
-		VolumeImage:  tag,
-		UID:          os.Getuid(),
-		GID:          os.Getgid(),
-		SeedDir:      p.HomeSeedDir(),
-		TmpDir:       p.RuntimeDir,
-	}
-	return sb.Exec(ctx, execArgv)
+	return &env{paths: p, cwd: cwd, proj: proj, pm: podman.Client{R: podman.CLI{}}}, nil
 }
 
-// Build force-builds the base image.
-func Build(ctx context.Context, opts image.BuildOptions) error {
-	p, err := paths.FromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	pm := podman.Client{R: podman.CLI{}}
-	if err := checkPodman(ctx, pm); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
-		return err
-	}
-	_, err = image.EnsureBase(ctx, pm, p.BaseOverrideDir(), p.RuntimeDir, opts, true, os.Stderr)
-	return err
-}
-
-func checkPodman(ctx context.Context, pm podman.Client) error {
-	v, err := pm.Version(ctx)
+// prepare checks podman and creates the runtime dir.
+func (e *env) prepare(ctx context.Context) error {
+	v, err := e.pm.Version(ctx)
 	if err != nil {
 		return fmt.Errorf("podman is missing or not working: %w", err)
 	}
-	return podman.CheckVersion(v)
+	if err := podman.CheckVersion(v); err != nil {
+		return err
+	}
+	return os.MkdirAll(e.paths.RuntimeDir, 0o700)
+}
+
+func (e *env) trustStore() trust.Store {
+	return trust.NewStore(e.paths.DataDir, e.proj.ID)
+}
+
+// errUntrusted is returned when approval is needed but nobody can give it.
+var errUntrusted = errors.New("untrusted sandbox config; run 'agent-sandbox trust'")
+
+// checkTrust gates .agent-sandbox/ (spec 3.4): trusted or absent passes; an
+// untrusted one is shown and prompted for on a terminal, refused otherwise.
+func (e *env) checkTrust() (trust.State, error) {
+	c, err := trust.Evaluate(e.proj.Root, e.trustStore())
+	if err != nil {
+		return 0, err
+	}
+	defer c.Discard()
+	if c.State != trust.Untrusted {
+		return c.State, nil
+	}
+	if !interactive() {
+		return 0, errUntrusted
+	}
+	ok, err := trust.Prompt(c, e.proj.Root, os.Stdin, os.Stderr)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, errors.New("sandbox config not trusted")
+	}
+	if err := c.Approve(); err != nil {
+		return 0, fmt.Errorf("recording approval: %w", err)
+	}
+	return trust.Trusted, nil
+}
+
+// interactive reports whether a person can answer a prompt.
+func interactive() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+}
+
+// images are the images a sandbox of this project runs.
+type images struct {
+	base    string // base image tag, also used for volume init
+	tag     string // the sandbox image: project image if any, else base
+	imageID string
+}
+
+// ensureImages builds what is missing (or everything with force). The
+// project image is built from the trusted snapshot, never the live dir.
+func (e *env) ensureImages(ctx context.Context, state trust.State, opts image.BuildOptions, force bool) (images, error) {
+	var im images
+	var err error
+	if im.base, err = image.EnsureBase(ctx, e.pm, e.paths.BaseOverrideDir(), e.paths.RuntimeDir, opts, force, os.Stderr); err != nil {
+		return im, err
+	}
+	baseID, err := e.pm.ImageID(ctx, im.base)
+	if err != nil {
+		return im, err
+	}
+	im.tag, im.imageID = im.base, baseID
+	if state != trust.Trusted {
+		return im, nil
+	}
+	snap := e.trustStore().SnapshotDir()
+	if _, err := os.Stat(filepath.Join(snap, "Containerfile")); err != nil {
+		return im, nil
+	}
+	im.tag, err = image.EnsureProject(ctx, e.pm, image.ProjectInput{
+		ProjectID:   e.proj.ID,
+		ContextDir:  snap,
+		BaseTag:     im.base,
+		BaseImageID: baseID,
+		WorkDir:     e.paths.RuntimeDir,
+	}, opts, force, os.Stderr)
+	if err != nil {
+		return im, err
+	}
+	im.imageID, err = e.pm.ImageID(ctx, im.tag)
+	return im, err
 }
 
 // executable is the running binary with symlinks (such as asb) resolved.

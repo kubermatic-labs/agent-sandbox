@@ -36,6 +36,11 @@ type Sandbox struct {
 
 	ReadyTimeout time.Duration // default 10s
 	ReadyPoll    time.Duration // default 100ms
+
+	// ImageID and BinaryHash are what a new container would get; a running
+	// container with other values is stale (spec 2.4 step 6).
+	ImageID    string
+	BinaryHash string
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -79,6 +84,7 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 	}
 	for _, c := range cs {
 		if c.State == "running" {
+			s.warnIfStale(c)
 			return nil
 		}
 	}
@@ -152,6 +158,16 @@ func (s *Sandbox) failStart(ctx context.Context, msg string) error {
 		fmt.Fprintf(s.Log, "agent-sandbox: removing the failed sandbox: %v\n", err)
 	}
 	return errors.New(msg)
+}
+
+// warnIfStale tells the user when the running sandbox was started from an
+// older image or binary. It is used anyway; stopping it picks up the new one.
+func (s *Sandbox) warnIfStale(c podman.Container) {
+	stale := (s.ImageID != "" && c.Labels["agent-sandbox.image-id"] != s.ImageID) ||
+		(s.BinaryHash != "" && c.Labels["agent-sandbox.binary"] != s.BinaryHash)
+	if stale {
+		fmt.Fprintf(s.Log, "agent-sandbox: the sandbox runs an older image or agent-sandbox binary; 'podman stop %s' to pick up the new one\n", s.Container)
+	}
 }
 
 func (s *Sandbox) running(ctx context.Context) (bool, error) {

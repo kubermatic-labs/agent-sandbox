@@ -28,6 +28,7 @@ type world struct {
 	initFails  bool
 	readyAfter int  // ready probes that fail before the ready file appears
 	dieOnStart bool // _init fails: the container exits before ready
+	labels     string
 }
 
 func (w *world) handle(args []string) podmantest.Result {
@@ -38,7 +39,11 @@ func (w *world) handle(args []string) podmantest.Result {
 		if w.state == "" {
 			return podmantest.Result{Out: "[]"}
 		}
-		return podmantest.Result{Out: fmt.Sprintf(`[{"Id":"c1","State":%q,"ExitCode":%d}]`, w.state, w.exitCode)}
+		labels := w.labels
+		if labels == "" {
+			labels = "{}"
+		}
+		return podmantest.Result{Out: fmt.Sprintf(`[{"Id":"c1","State":%q,"ExitCode":%d,"Labels":%s}]`, w.state, w.exitCode, labels)}
 	case args[0] == "volume" && args[1] == "exists":
 		if w.volumes[args[2]] {
 			return podmantest.Result{}
@@ -292,5 +297,30 @@ func TestReadyTimeout(t *testing.T) {
 	}
 	if len(f.CallsWith("rm")) != 1 || len(sessionExecs(f)) != 0 {
 		t.Errorf("calls = %q", f.Calls())
+	}
+}
+
+func TestStaleWarning(t *testing.T) {
+	for name, tt := range map[string]struct {
+		labels string
+		stale  bool
+	}{
+		"current":    {`{"agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, false},
+		"old image":  {`{"agent-sandbox.image-id":"img0","agent-sandbox.binary":"bin1"}`, true},
+		"old binary": {`{"agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin0"}`, true},
+		"no labels":  {`{}`, true},
+	} {
+		w := &world{state: "running", labels: tt.labels}
+		s, f, log := newSandbox(t, w)
+		s.ImageID, s.BinaryHash = "img1", "bin1"
+		if _, err := s.Exec(context.Background(), execArgv); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(log.String(), "older image"); got != tt.stale {
+			t.Errorf("%s: warned=%v, want %v (log %q)", name, got, tt.stale, log.String())
+		}
+		if len(f.CallsWith("run")) != 0 {
+			t.Errorf("%s: a stale sandbox must still be used, not replaced", name)
+		}
 	}
 }

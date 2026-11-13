@@ -68,3 +68,22 @@ func TestFromEnvErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestFromEnvAgentSandboxOverrides(t *testing.T) {
+	p, err := FromEnv(envOf(map[string]string{
+		"HOME": "/home/u", "XDG_RUNTIME_DIR": "/run/user/1000",
+		"AGENT_SANDBOX_CONFIG_DIR": "/t/cfg", "AGENT_SANDBOX_DATA_DIR": "/t/data",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ConfigDir != "/t/cfg" || p.DataDir != "/t/data" {
+		t.Errorf("ConfigDir %q, DataDir %q", p.ConfigDir, p.DataDir)
+	}
+	if p.ConfigHome != "/home/u/.config" || p.DataHome != "/home/u/.local/share" {
+		t.Errorf("the overrides must not move the XDG bases: %q %q", p.ConfigHome, p.DataHome)
+	}
+	if p.GlobalConfig() != "/t/cfg/config.toml" {
+		t.Errorf("GlobalConfig = %q", p.GlobalConfig())
+	}
+}

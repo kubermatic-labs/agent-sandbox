@@ -18,17 +18,25 @@ import (
 type (
 	runFunc   func(context.Context, app.RunOptions) (int, error)
 	buildFunc func(context.Context, image.BuildOptions) error
+	trustFunc func(context.Context) error
 )
 
+// commands are the implementations the CLI dispatches to; tests replace them.
+type commands struct {
+	run   runFunc
+	build buildFunc
+	trust trustFunc
+}
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, app.Run, app.Build))
+	os.Exit(run(os.Args[1:], os.Stderr, commands{run: app.Run, build: app.Build, trust: app.Trust}))
 }
 
 // run executes the CLI and returns the process exit code: the session's exit
 // code, or 1 for wrapper errors.
-func run(args []string, stderr io.Writer, runFn runFunc, buildFn buildFunc) int {
+func run(args []string, stderr io.Writer, cmds commands) int {
 	code := 0
-	root := newRootCmd(&code, runFn, buildFn)
+	root := newRootCmd(&code, cmds)
 	root.SetArgs(args)
 	root.SetErr(stderr)
 	if err := root.ExecuteContext(context.Background()); err != nil {
@@ -40,7 +48,7 @@ func run(args []string, stderr io.Writer, runFn runFunc, buildFn buildFunc) int 
 	return code
 }
 
-func newRootCmd(code *int, runFn runFunc, buildFn buildFunc) *cobra.Command {
+func newRootCmd(code *int, cmds commands) *cobra.Command {
 	var name string
 	root := &cobra.Command{
 		Use:           "agent-sandbox [-n NAME] [-- CMD ARGS...]",
@@ -59,13 +67,13 @@ func newRootCmd(code *int, runFn runFunc, buildFn buildFunc) *cobra.Command {
 			if len(args) == 0 {
 				args = nil
 			}
-			c, err := runFn(cmd.Context(), app.RunOptions{Name: name, Cmd: args})
+			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args})
 			*code = c
 			return err
 		},
 	}
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
-	root.AddCommand(newBuildCmd(buildFn), newInitCmd(code))
+	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code))
 	return root
 }
 
@@ -88,11 +96,22 @@ func newInitCmd(code *int) *cobra.Command {
 	return cmd
 }
 
+func newTrustCmd(trustFn trustFunc) *cobra.Command {
+	return &cobra.Command{
+		Use:   "trust",
+		Short: "Review .agent-sandbox/ against the last approved version and approve it",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return trustFn(cmd.Context())
+		},
+	}
+}
+
 func newBuildCmd(buildFn buildFunc) *cobra.Command {
 	var opts image.BuildOptions
 	cmd := &cobra.Command{
 		Use:   "build [--no-cache] [--pull]",
-		Short: "Force a base image build",
+		Short: "Force a build of the base image and the project image",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return buildFn(cmd.Context(), opts)

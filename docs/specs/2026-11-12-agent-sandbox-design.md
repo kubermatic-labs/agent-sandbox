@@ -109,6 +109,9 @@ If the container vanishes between step 6 and the exec (the idle race), retry ste
 ### 3.1 Config files
 
 - Global: `~/.config/agent-sandbox/config.toml`. Always trusted, never visible in the container.
+- Directories follow `XDG_CONFIG_HOME` / `XDG_DATA_HOME`. `AGENT_SANDBOX_CONFIG_DIR` and `AGENT_SANDBOX_DATA_DIR`
+  override only agent-sandbox's own directories (the integration tests use them): changing the XDG variables would
+  also move podman's configuration and image store.
 - Project: `<root>/.agent-sandbox/config.toml`. Gated by trust. In `ro` mode it is visible read-only in the
   container (deny-list, section 5.2). In worktree mode the host root's copy, which is the one actually used, is not
   mounted; the worktree's own checked-out copy is overlaid read-only like any deny-list path.
@@ -190,24 +193,36 @@ tokens (section 11).
   ```
 
   The wrapper passes `--build-arg BASE_IMAGE=localhost/agent-sandbox-base:<hash>`.
-- Build context: **only `<root>/.agent-sandbox/`**, never the whole repo.
+- The final stage must be `FROM ${BASE_IMAGE}` (or `$BASE_IMAGE`); earlier stages of a multi-stage build may use
+  other images. Anything else is refused before building.
+- Build context: **the trusted snapshot of `<root>/.agent-sandbox/`** (section 3.4), never the live directory and
+  never the whole repo, so the image is built from exactly what was approved.
 - Tag: `localhost/asb-<project-id>:<hash>`, where `<hash>` is sha256 of the base image ID plus all context files
-  (sorted path, mode and content).
-- After a successful build, remove older `localhost/asb-<project-id>:*` tags that no running container uses.
+  (sorted path, mode and content). Tags use the first 16 hex characters.
+- `build --pull` refreshes the base image; the project build then only drops its cache (`--no-cache`), since
+  `--pull=always` would try to pull the local base image from a registry.
+- After a successful build, remove older `localhost/asb-<project-id>:*` tags that no running container uses (podman
+  refuses to remove an image a container uses).
+- `build` is gated by trust like the main command; it never builds an unapproved Containerfile.
 - If there is no project Containerfile, run the base image directly.
 
 Build output is streamed to the terminal. A failed build exits non-zero and never touches a running container.
 
 ### 3.4 Trust
 
-- The trust hash is sha256 over every file in `<root>/.agent-sandbox/` (sorted relative path, mode and content).
+- `.agent-sandbox/` is first copied to a staging dir in the store; hashing, the diff, approval and the project
+  image build all use copies, so what is approved is exactly what is used. Only regular files and directories are
+  allowed: a symlink (or the directory itself being one) is refused, so the build context cannot reach outside.
+- The trust hash is sha256 over every file in the copy (sorted relative path, mode and content).
 - Store: `~/.local/share/agent-sandbox/trust/<project-id>/`, containing `hash` plus `snapshot/`, a copy of the last
-  approved files.
+  approved files. Approval swaps the staging dir in as `snapshot/` and writes `hash` last, so an interrupted
+  approval asks again.
 - If the hash is missing or different:
   - TTY: show a unified diff against the snapshot (everything is new on first sight), print a summary of the
     security-relevant settings (`network`, `allow_cidrs`, `allow_domains`, `git`, `mounts`, `readonly`, `env`,
     `worktree_copy`, the Containerfile) and ask `y/N`. On yes, update the store.
   - No TTY: exit 1 with `untrusted sandbox config; run 'agent-sandbox trust'`.
+- The prompt needs a terminal on both stdin and stderr.
 - `agent-sandbox trust` runs the same prompt explicitly.
 - `agent-sandbox init` writes the files and records them as trusted.
 - If the project has no `.agent-sandbox/`, it is implicitly trusted (only global config applies).
@@ -593,6 +608,8 @@ The README states these plainly:
   with an attacker's API key.
 - `open` mode can reach the host through `host.containers.internal`, and the LAN.
 - Deny-list paths that did not exist at container start are not protected; the post-session scan only detects them.
+- An approved project Containerfile runs its `RUN` steps on the host with podman's default (unrestricted) build
+  network. The trust prompt says so; review it like any script you run.
 - The agent can change any project file, including build scripts, `Makefile`, `package.json` scripts and test code
   that the user later runs on the host. Review diffs before running project code on the host.
 - Worktree mode: the agent can overwrite or delete loose objects the host has not packed yet (`--gc` closes this).

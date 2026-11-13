@@ -19,6 +19,11 @@ type Paths struct {
 
 // FromEnv builds Paths from environment variables. Relative XDG values are
 // ignored, as the XDG base directory spec requires.
+//
+// AGENT_SANDBOX_CONFIG_DIR and AGENT_SANDBOX_DATA_DIR override only
+// agent-sandbox's own directories. Changing XDG_CONFIG_HOME or
+// XDG_DATA_HOME instead would also move podman's configuration and image
+// store.
 func FromEnv(getenv func(string) string) (Paths, error) {
 	home := getenv("HOME")
 	if !filepath.IsAbs(home) {
@@ -35,8 +40,8 @@ func FromEnv(getenv func(string) string) (Paths, error) {
 		DataHome:   absOr(getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share")),
 		XDGRuntime: filepath.Clean(rt),
 	}
-	p.ConfigDir = filepath.Join(p.ConfigHome, "agent-sandbox")
-	p.DataDir = filepath.Join(p.DataHome, "agent-sandbox")
+	p.ConfigDir = absOr(getenv("AGENT_SANDBOX_CONFIG_DIR"), filepath.Join(p.ConfigHome, "agent-sandbox"))
+	p.DataDir = absOr(getenv("AGENT_SANDBOX_DATA_DIR"), filepath.Join(p.DataHome, "agent-sandbox"))
 	p.RuntimeDir = filepath.Join(p.XDGRuntime, "agent-sandbox")
 	return p, nil
 }

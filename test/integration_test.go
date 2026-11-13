@@ -47,10 +47,11 @@ const openNetwork = "network = \"open\"\n"
 
 // sandboxEnv is one throwaway git project with its own global config dir.
 type sandboxEnv struct {
-	t       *testing.T
-	root    string
-	cfgHome string
-	id      string
+	t        *testing.T
+	root     string
+	cfgHome  string
+	dataHome string
+	id       string
 }
 
 func newProject(t *testing.T, globalConfig string) *sandboxEnv {
@@ -70,7 +71,7 @@ func newProject(t *testing.T, globalConfig string) *sandboxEnv {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(globalConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e := &sandboxEnv{t: t, root: root, cfgHome: cfgHome, id: project.ComputeID(root)}
+	e := &sandboxEnv{t: t, root: root, cfgHome: cfgHome, dataHome: t.TempDir(), id: project.ComputeID(root)}
 	t.Cleanup(e.cleanup)
 	return e
 }
@@ -85,6 +86,19 @@ func (e *sandboxEnv) cleanup() {
 	for _, v := range strings.Fields(string(out)) {
 		_ = exec.Command("podman", "volume", "rm", "-f", v).Run()
 	}
+	out, _ = exec.Command("podman", "images", "--format", "{{.Repository}}:{{.Tag}}", "--filter", "reference=localhost/asb-"+e.id).Output()
+	for _, ref := range strings.Fields(string(out)) {
+		_ = exec.Command("podman", "rmi", "-f", ref).Run()
+	}
+}
+
+// environ is the environment agent-sandbox runs with in tests. It must not
+// change XDG_CONFIG_HOME or XDG_DATA_HOME: podman reads its configuration and
+// image store from those.
+func (e *sandboxEnv) environ() []string {
+	return append(os.Environ(),
+		"AGENT_SANDBOX_CONFIG_DIR="+filepath.Join(e.cfgHome, "agent-sandbox"),
+		"AGENT_SANDBOX_DATA_DIR="+e.dataHome)
 }
 
 type result struct {
@@ -96,7 +110,7 @@ type result struct {
 func (e *sandboxEnv) run(dir, stdin string, args ...string) result {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+e.cfgHome)
+	cmd.Env = e.environ()
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
