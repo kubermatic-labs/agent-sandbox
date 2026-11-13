@@ -168,8 +168,9 @@ Validation:
     (`~/.bashrc`, `~/.profile`, `~/.local/bin`, ...), or overlaps a directory on the host `$PATH` (`~/bin`);
   - it contains `:` or `,`.
 - `mounts[].dst` must be absolute after `~` expansion. It must not be `/` or `$HOME` (the home volume), must not lie
-  inside the project root or the agent-sandbox data dir (worktrees are mounted from there), and must not lie inside `/usr/local/bin/agent-sandbox`, `/cache`, `/run/asb`, `/proc`,
-  `/sys` or `/dev`.
+  inside the project root or the agent-sandbox data dir (worktrees are mounted from there), and must neither lie inside
+  nor contain `/usr/local/bin/agent-sandbox`, `/cache`, `/run/asb`, `/proc`, `/sys` or `/dev`: a mount on `/run`
+  could hold a stale `/run/asb/ready` and let a session start before the network rules are applied.
 - `env` must not set reserved keys: `HOME`, `PATH`, `USER`, `GIT_CONFIG_*`, `HTTP_PROXY`, `HTTPS_PROXY`,
   `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy`, or any env var a cache preset sets.
 

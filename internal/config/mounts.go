@@ -123,8 +123,11 @@ func checkDst(dst string, env Env) error {
 	if env.DataDir != "" && fspath.Within(dst, env.DataDir) {
 		return errors.New("must not shadow the agent-sandbox data dir (worktrees are mounted from there)")
 	}
+	// Overlap, not Within: a mount on a parent such as /run or /usr/local/bin
+	// shadows the reserved path too (a host dir on /run could hold a stale
+	// /run/asb/ready that lets a session start before the network rules).
 	for _, r := range reservedDsts {
-		if fspath.Within(dst, r) {
+		if fspath.Overlap(dst, r) {
 			return fmt.Errorf("%s is reserved by agent-sandbox", r)
 		}
 	}

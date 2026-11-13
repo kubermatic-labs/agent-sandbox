@@ -102,6 +102,9 @@ func TestResolveMountRefuses(t *testing.T) {
 		{"dst relative", Mount{Src: "~/data", Dst: "x", RO: true}, "absolute"},
 		{"dst cache", Mount{Src: "~/data", Dst: "/cache/go", RO: true}, "reserved"},
 		{"dst binary", Mount{Src: "~/data", Dst: "/usr/local/bin/agent-sandbox", RO: true}, "reserved"},
+		{"dst parent of ready dir", Mount{Src: "~/data", Dst: "/run", RO: true}, "reserved"},
+		{"dst parent of binary", Mount{Src: "~/data", Dst: "/usr/local/bin", RO: true}, "reserved"},
+		{"dst grandparent of binary", Mount{Src: "~/data", Dst: "/usr", RO: true}, "reserved"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
