@@ -57,7 +57,13 @@ func (e *sandboxEnv) projectImageTags() []string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	return strings.Fields(string(out))
+	var tags []string
+	for _, ref := range strings.Fields(string(out)) {
+		if strings.HasPrefix(ref, "localhost/asb-"+e.id+":") {
+			tags = append(tags, ref)
+		}
+	}
+	return tags
 }
 
 const projectContainerfile = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo %s > /etc/asb-project-marker\n"

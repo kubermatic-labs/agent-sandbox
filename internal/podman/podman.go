@@ -179,11 +179,12 @@ func (c Client) VolumeRemove(ctx context.Context, name string) error {
 
 // Container is one entry of podman ps --format json.
 type Container struct {
-	ID       string            `json:"Id"`
-	Names    []string          `json:"Names"`
-	State    string            `json:"State"`
-	ExitCode int               `json:"ExitCode"`
-	Labels   map[string]string `json:"Labels"`
+	ID        string            `json:"Id"`
+	Names     []string          `json:"Names"`
+	State     string            `json:"State"`
+	ExitCode  int               `json:"ExitCode"`
+	Labels    map[string]string `json:"Labels"`
+	StartedAt int64             `json:"StartedAt"` // unix seconds
 }
 
 // ListContainers returns all containers (running or not) carrying every label.
@@ -208,6 +209,67 @@ func (c Client) ListContainers(ctx context.Context, labels map[string]string) ([
 func (c Client) Remove(ctx context.Context, nameOrID string) error {
 	_, err := c.R.Output(ctx, "rm", "--force", "--time", "0", "--ignore", nameOrID)
 	return err
+}
+
+// Stop stops a container, giving it timeout seconds before SIGKILL.
+func (c Client) Stop(ctx context.Context, nameOrID string, timeout int) error {
+	_, err := c.R.Output(ctx, "stop", "--ignore", "--time", strconv.Itoa(timeout), nameOrID)
+	return err
+}
+
+// Process is one row of podman top.
+type Process struct {
+	PID  string
+	User string // as the container's /etc/passwd names it
+}
+
+// Top lists a running container's processes.
+func (c Client) Top(ctx context.Context, nameOrID string) ([]Process, error) {
+	out, err := c.R.Output(ctx, "top", nameOrID, "pid", "user")
+	if err != nil {
+		return nil, err
+	}
+	var ps []Process
+	for i, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Fields(line)
+		if i == 0 || len(f) < 2 {
+			continue // header
+		}
+		ps = append(ps, Process{PID: f[0], User: f[1]})
+	}
+	return ps, nil
+}
+
+// Volume is one entry of podman volume ls --format json.
+type Volume struct {
+	Name   string            `json:"Name"`
+	Labels map[string]string `json:"Labels"`
+}
+
+// ListVolumes returns the volumes carrying every label.
+func (c Client) ListVolumes(ctx context.Context, labels map[string]string) ([]Volume, error) {
+	args := []string{"volume", "ls", "--format", "json"}
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		args = append(args, "--filter", "label="+k+"="+labels[k])
+	}
+	out, err := c.R.Output(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var vs []Volume
+	if err := json.Unmarshal(out, &vs); err != nil {
+		return nil, fmt.Errorf("parsing podman volume ls output: %w", err)
+	}
+	return vs, nil
+}
+
+// ImageTags returns an image's tags; none means a newer build took them.
+func (c Client) ImageTags(ctx context.Context, id string) ([]string, error) {
+	out, err := c.R.Output(ctx, "image", "inspect", "--format", "{{range .RepoTags}}{{.}} {{end}}", id)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
 }
 
 // MountDestinations returns the container paths of a container's mounts.

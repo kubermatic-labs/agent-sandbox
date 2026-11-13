@@ -86,9 +86,13 @@ func (e *sandboxEnv) cleanup() {
 	for _, v := range strings.Fields(string(out)) {
 		_ = exec.Command("podman", "volume", "rm", "-f", v).Run()
 	}
+	// The reference filter matches images, and an image built without new
+	// layers carries the base tag too: only remove the project's own tags.
 	out, _ = exec.Command("podman", "images", "--format", "{{.Repository}}:{{.Tag}}", "--filter", "reference=localhost/asb-"+e.id).Output()
 	for _, ref := range strings.Fields(string(out)) {
-		_ = exec.Command("podman", "rmi", "-f", ref).Run()
+		if strings.HasPrefix(ref, "localhost/asb-"+e.id+":") {
+			_ = exec.Command("podman", "rmi", ref).Run()
+		}
 	}
 }
 

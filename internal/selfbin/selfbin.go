@@ -42,6 +42,9 @@ func Stage(exe, dataDir string) (path, hash string, err error) {
 	return path, hash, nil
 }
 
+// Hash returns the sha256 of the binary at exe, as Stage records it.
+func Hash(exe string) (string, error) { return hashFile(exe) }
+
 func hashFile(p string) (string, error) {
 	f, err := os.Open(p)
 	if err != nil {

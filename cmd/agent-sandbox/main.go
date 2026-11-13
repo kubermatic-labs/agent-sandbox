@@ -18,21 +18,29 @@ import (
 	"k8c.io/agent-sandbox/internal/proxy"
 )
 
-type (
-	runFunc   func(context.Context, app.RunOptions) (int, error)
-	buildFunc func(context.Context, image.BuildOptions) error
-	trustFunc func(context.Context) error
-)
-
 // commands are the implementations the CLI dispatches to; tests replace them.
 type commands struct {
-	run   runFunc
-	build buildFunc
-	trust trustFunc
+	run          func(context.Context, app.RunOptions) (int, error)
+	build        func(context.Context, image.BuildOptions) error
+	trust        func(context.Context) error
+	status       func(ctx context.Context, all bool, out io.Writer) error
+	stop         func(ctx context.Context, name string, all bool, out io.Writer) error
+	worktreeList func(ctx context.Context, out io.Writer) error
+	worktreeRm   func(ctx context.Context, name string, force, deleteBranch bool, out io.Writer) error
+	scaffold     func(ctx context.Context, out io.Writer) error
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, commands{run: app.Run, build: app.Build, trust: app.Trust}))
+	os.Exit(run(os.Args[1:], os.Stderr, commands{
+		run:          app.Run,
+		build:        app.Build,
+		trust:        app.Trust,
+		status:       app.Status,
+		stop:         app.Stop,
+		worktreeList: app.WorktreeList,
+		worktreeRm:   app.WorktreeRm,
+		scaffold:     app.Init,
+	}))
 }
 
 // run executes the CLI and returns the process exit code: the session's exit
@@ -55,7 +63,7 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 	var name string
 	var strict, gc bool
 	root := &cobra.Command{
-		Use:           "agent-sandbox [-n NAME] [--strict] [-- CMD ARGS...]",
+		Use:           "agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]",
 		Short:         "Run AI coding agents in a per-project rootless podman sandbox",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -79,12 +87,90 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
 	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
 	root.Flags().BoolVar(&gc, "gc", false, "worktree mode: run git gc on the host first, so the agent cannot touch unpacked objects")
-	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code), newProxyCmd())
+	root.AddCommand(
+		newScaffoldCmd(cmds), newTrustCmd(cmds.trust), newBuildCmd(cmds.build),
+		newStatusCmd(cmds), newStopCmd(cmds), newWorktreeCmd(cmds),
+		newPID1Cmd(code), newProxyCmd(),
+	)
 	return root
 }
 
-// newInitCmd is the container's PID 1 (spec 4.2). Hidden: users never run it.
-func newInitCmd(code *int) *cobra.Command {
+func newScaffoldCmd(cmds commands) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Create .agent-sandbox/{config.toml,Containerfile} and trust them",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmds.scaffold(cmd.Context(), cmd.OutOrStdout())
+		},
+	}
+}
+
+func newStatusCmd(cmds commands) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "status [--all]",
+		Short: "List this project's sandboxes (--all: every project's, plus volumes)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmds.status(cmd.Context(), all, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "all projects, plus their volumes")
+	return cmd
+}
+
+func newStopCmd(cmds commands) *cobra.Command {
+	var name string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "stop [-n NAME | --all]",
+		Short: "Stop a sandbox of this project now (--all: every sandbox of this project)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmds.stop(cmd.Context(), name, all, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
+	cmd.Flags().BoolVar(&all, "all", false, "every sandbox of this project")
+	cmd.MarkFlagsMutuallyExclusive("name", "all")
+	return cmd
+}
+
+func newWorktreeCmd(cmds commands) *cobra.Command {
+	wt := &cobra.Command{
+		Use:   "worktree",
+		Short: "Manage the git worktrees of worktree-mode sandboxes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List worktrees: name, branch, commits ahead of HEAD, dirty, running",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmds.worktreeList(cmd.Context(), cmd.OutOrStdout())
+		},
+	}
+	var force, deleteBranch bool
+	rm := &cobra.Command{
+		Use:   "rm NAME [--force] [--delete-branch]",
+		Short: "Remove a worktree; refuses while it runs or is dirty, unless --force",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmds.worktreeRm(cmd.Context(), args[0], force, deleteBranch, cmd.OutOrStdout())
+		},
+	}
+	rm.Flags().BoolVar(&force, "force", false, "stop a running sandbox and discard uncommitted changes")
+	rm.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete branch asb/NAME")
+	wt.AddCommand(list, rm)
+	return wt
+}
+
+// newPID1Cmd is the container's PID 1 (spec 4.2). Hidden: users never run it.
+func newPID1Cmd(code *int) *cobra.Command {
 	var o initd.Options
 	cmd := &cobra.Command{
 		Use:    "_init",
@@ -133,7 +219,7 @@ func newProxyCmd() *cobra.Command {
 	return cmd
 }
 
-func newTrustCmd(trustFn trustFunc) *cobra.Command {
+func newTrustCmd(trustFn func(context.Context) error) *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust",
 		Short: "Review .agent-sandbox/ against the last approved version and approve it",
@@ -144,7 +230,7 @@ func newTrustCmd(trustFn trustFunc) *cobra.Command {
 	}
 }
 
-func newBuildCmd(buildFn buildFunc) *cobra.Command {
+func newBuildCmd(buildFn func(context.Context, image.BuildOptions) error) *cobra.Command {
 	var opts image.BuildOptions
 	cmd := &cobra.Command{
 		Use:   "build [--no-cache] [--pull]",

@@ -154,3 +154,40 @@ func TestMountDestinations(t *testing.T) {
 		t.Errorf("argv (-want +got):\n%s", diff)
 	}
 }
+
+func TestManagementCommands(t *testing.T) {
+	f := &podmantest.Fake{Handler: func(args []string) podmantest.Result {
+		switch args[0] {
+		case "top":
+			return podmantest.Result{Out: "PID         USER\n1           nobody\n7           65533\n12          kron\n"}
+		case "volume":
+			return podmantest.Result{Out: `[{"Name":"asb-p-1-home","Labels":{"agent-sandbox.project-id":"p-1"}}]`}
+		case "image":
+			return podmantest.Result{Out: "localhost/asb-p-1:abc localhost/x:y \n"}
+		}
+		return podmantest.Result{}
+	}}
+	c := podman.Client{R: f}
+	ctx := context.Background()
+	ps, err := c.Top(ctx, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]podman.Process{{PID: "1", User: "nobody"}, {PID: "7", User: "65533"}, {PID: "12", User: "kron"}}, ps); diff != "" {
+		t.Errorf("Top (-want +got):\n%s", diff)
+	}
+	vs, err := c.ListVolumes(ctx, map[string]string{"agent-sandbox": "1"})
+	if err != nil || len(vs) != 1 || vs[0].Labels["agent-sandbox.project-id"] != "p-1" {
+		t.Errorf("ListVolumes = %+v, %v", vs, err)
+	}
+	tags, err := c.ImageTags(ctx, "abc")
+	if err != nil || len(tags) != 2 {
+		t.Errorf("ImageTags = %q, %v", tags, err)
+	}
+	if err := c.Stop(ctx, "c", 10); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"stop", "--ignore", "--time", "10", "c"}, f.CallsWith("stop")[0]); diff != "" {
+		t.Errorf("stop argv (-want +got):\n%s", diff)
+	}
+}

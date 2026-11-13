@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -17,12 +19,35 @@ type recorder struct {
 	runs   []app.RunOptions
 	builds []image.BuildOptions
 	trusts int
+	calls  []string // management commands, rendered
 	code   int
 	err    error
 }
 
 func (r *recorder) cmds() commands {
-	return commands{run: r.run, build: r.build, trust: r.trust}
+	return commands{
+		run: r.run, build: r.build, trust: r.trust,
+		status: func(_ context.Context, all bool, _ io.Writer) error {
+			r.calls = append(r.calls, fmt.Sprintf("status all=%v", all))
+			return r.err
+		},
+		stop: func(_ context.Context, name string, all bool, _ io.Writer) error {
+			r.calls = append(r.calls, fmt.Sprintf("stop name=%s all=%v", name, all))
+			return r.err
+		},
+		worktreeList: func(context.Context, io.Writer) error {
+			r.calls = append(r.calls, "worktree list")
+			return r.err
+		},
+		worktreeRm: func(_ context.Context, name string, force, del bool, _ io.Writer) error {
+			r.calls = append(r.calls, fmt.Sprintf("worktree rm %s force=%v delete=%v", name, force, del))
+			return r.err
+		},
+		scaffold: func(context.Context, io.Writer) error {
+			r.calls = append(r.calls, "init")
+			return r.err
+		},
+	}
 }
 
 func (r *recorder) trust(context.Context) error {
@@ -113,5 +138,33 @@ func TestTrust(t *testing.T) {
 	}
 	if code := run([]string{"trust", "now"}, &bytes.Buffer{}, r.cmds()); code != 1 {
 		t.Errorf("trust with args: exit %d", code)
+	}
+}
+
+func TestManagementCommands(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		want string
+		code int
+	}{
+		{[]string{"status"}, "status all=false", 0},
+		{[]string{"status", "--all"}, "status all=true", 0},
+		{[]string{"stop"}, "stop name=default all=false", 0},
+		{[]string{"stop", "-n", "dev"}, "stop name=dev all=false", 0},
+		{[]string{"stop", "--all"}, "stop name=default all=true", 0},
+		{[]string{"stop", "-n", "dev", "--all"}, "", 1},
+		{[]string{"worktree", "list"}, "worktree list", 0},
+		{[]string{"worktree", "rm", "dev", "--force", "--delete-branch"}, "worktree rm dev force=true delete=true", 0},
+		{[]string{"worktree", "rm"}, "", 1},
+		{[]string{"init"}, "init", 0},
+		{[]string{"init", "x"}, "", 1},
+	} {
+		r := &recorder{}
+		var stderr bytes.Buffer
+		code := run(tt.args, &stderr, r.cmds())
+		got := strings.Join(r.calls, ";")
+		if code != tt.code || got != tt.want || len(r.runs) != 0 {
+			t.Errorf("%q: exit %d, calls %q, runs %d; want exit %d, %q (stderr %q)", tt.args, code, got, len(r.runs), tt.code, tt.want, stderr.String())
+		}
 	}
 }

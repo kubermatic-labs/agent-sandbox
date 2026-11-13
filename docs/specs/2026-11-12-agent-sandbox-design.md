@@ -70,8 +70,8 @@ agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]   # main entry: ensur
 agent-sandbox init                                    # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
-agent-sandbox status [--all]                          # sandboxes for this project (or all): name, uptime, sessions, stale image?
-agent-sandbox stop [-n NAME | --all]                  # stop now instead of waiting for idle
+agent-sandbox status [--all]                          # sandboxes for this project (or all, plus volumes): name, state, uptime, sessions, stale, git mode
+agent-sandbox stop [-n NAME | --all]                  # stop now instead of waiting for idle; --all = every sandbox of this project
 agent-sandbox worktree list                           # name, branch, ahead of HEAD, dirty, running
 agent-sandbox worktree rm NAME [--force] [--delete-branch]
 ```
@@ -81,6 +81,12 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
 - A TTY is allocated (`-it`) only when stdin is a terminal, so `echo ... | agent-sandbox -- claude -p` works.
 - The exit code of the exec'd command is passed through.
 - An `asb` symlink to the binary behaves the same.
+- `status`: sessions are the container's processes other than PID 1 and the proxy (from `podman top`). A sandbox is
+  stale when it runs another agent-sandbox binary, or an image whose tag a newer build has taken.
+- `init` writes a fully commented `config.toml` and a `Containerfile` with only `ARG BASE_IMAGE` / `FROM ${BASE_IMAGE}`,
+  then records them as trusted; it refuses if `.agent-sandbox/` exists.
+- `worktree rm` with `--force` also stops a running sandbox and discards uncommitted changes. If the worktree
+  directory is already gone, it runs `git worktree prune`.
 
 ### 2.4 Main flow
 
