@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -47,13 +48,10 @@ func TestPolicy(t *testing.T) {
 func newProxy(t *testing.T, domains []string, target string) (*httptest.Server, *strings.Builder) {
 	t.Helper()
 	log := &strings.Builder{}
-	s := &Server{
-		Policy: Policy{Domains: domains},
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, network, target)
-		},
-		Log: log,
+	s := New(Policy{Domains: domains}, log)
+	s.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, target)
 	}
 	srv := httptest.NewServer(s)
 	t.Cleanup(srv.Close)
@@ -150,5 +148,33 @@ func TestBadRequests(t *testing.T) {
 	}
 	if r.StatusCode != http.StatusBadGateway {
 		t.Errorf("failed dial: %d", r.StatusCode)
+	}
+}
+
+func TestPlainHTTPReusesUpstreamConnections(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+	var dials atomic.Int32
+	s := New(Policy{Domains: []string{"allowed.test"}}, io.Discard)
+	s.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		dials.Add(1)
+		var d net.Dialer
+		return d.DialContext(ctx, network, upstream.Listener.Addr().String())
+	}
+	proxySrv := httptest.NewServer(s)
+	defer proxySrv.Close()
+	c := client(proxySrv.URL, nil)
+	for i := range 3 {
+		resp, err := c.Get("http://allowed.test/")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	if n := dials.Load(); n != 1 {
+		t.Errorf("upstream dials = %d, want 1 (connections not reused)", n)
 	}
 }

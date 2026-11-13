@@ -54,17 +54,40 @@ func (p Policy) Allowed(host string) bool {
 	return false
 }
 
-// Server is the proxy handler.
+// Server is the proxy handler. Create it with New.
 type Server struct {
 	Policy Policy
 	Dial   func(ctx context.Context, network, addr string) (net.Conn, error)
 	Log    io.Writer
+
+	tr *http.Transport // plain-HTTP forwarding, shared so connections are reused
 }
 
-// New returns a server that dials with a 30 s connect timeout.
+// New returns a server that dials with a 30 s connect timeout. Plain-HTTP
+// requests share one transport, so upstream connections are reused: pooled
+// connections are keyed by host:port, and every request is checked against
+// the policy first, so reuse never reaches a host the request was not
+// allowed to. The transport dials through s.Dial at dial time, so Dial may
+// be replaced after New.
 func New(p Policy, log io.Writer) *Server {
 	d := &net.Dialer{Timeout: 30 * time.Second}
-	return &Server{Policy: p, Dial: d.DialContext, Log: log}
+	s := &Server{
+		Policy: p,
+		Dial:   d.DialContext,
+		Log:    log,
+		tr: &http.Transport{
+			Proxy: nil,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return d.DialContext(ctx, network, addr)
+			},
+			ResponseHeaderTimeout: 2 * time.Minute,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   8,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
+
+	return s
 }
 
 // hopHeaders are removed when forwarding plain HTTP.
@@ -165,13 +188,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request) {
 	for _, h := range hopHeaders {
 		out.Header.Del(h)
 	}
-	tr := &http.Transport{
-		Proxy:                 nil,
-		DialContext:           s.Dial,
-		ResponseHeaderTimeout: 2 * time.Minute,
-	}
-	defer tr.CloseIdleConnections()
-	resp, err := tr.RoundTrip(out)
+	resp, err := s.tr.RoundTrip(out)
 	if err != nil {
 		fmt.Fprintf(s.Log, "agent-sandbox _proxy: %s %s: %v\n", r.Method, r.URL.Host, err)
 		http.Error(w, "agent-sandbox: "+err.Error(), http.StatusBadGateway)
