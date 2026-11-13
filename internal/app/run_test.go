@@ -7,6 +7,10 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"k8c.io/agent-sandbox/internal/paths"
+	"k8c.io/agent-sandbox/internal/project"
+	"k8c.io/agent-sandbox/internal/trust"
 )
 
 func TestGitIncludes(t *testing.T) {
@@ -40,5 +44,17 @@ func TestGitIncludes(t *testing.T) {
 	}
 	if _, err := gitIncludes([]string{"linked/x.inc"}, tree, nil); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("symlinked include: err = %v", err)
+	}
+}
+
+func TestProjectConfigIsTheApprovedSnapshot(t *testing.T) {
+	e := &env{paths: paths.Paths{DataDir: "/data"}, proj: project.Project{Root: "/proj", ID: "p1"}}
+	if got := e.projectConfig(trust.Trusted); got != "/data/trust/p1/snapshot/config.toml" {
+		t.Errorf("trusted: %q", got)
+	}
+	// Implicit: .agent-sandbox/ was absent at the check; a config that
+	// appears later is unapproved.
+	if got := e.projectConfig(trust.Implicit); got != "" {
+		t.Errorf("implicit: %q", got)
 	}
 }

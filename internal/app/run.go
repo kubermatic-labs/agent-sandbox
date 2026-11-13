@@ -23,7 +23,6 @@ import (
 	"k8c.io/agent-sandbox/internal/sandbox"
 	"k8c.io/agent-sandbox/internal/scan"
 	"k8c.io/agent-sandbox/internal/selfbin"
-	"k8c.io/agent-sandbox/internal/trust"
 	"k8c.io/agent-sandbox/internal/worktree"
 )
 
@@ -51,8 +50,10 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	}
 	p, proj := e.paths, e.proj
 
-	// Config is always read from the host project root (spec 3.1).
-	cfg, err := config.Load(p.GlobalConfig(), filepath.Join(proj.Root, trust.DirName, "config.toml"), config.Env{
+	// The project config is the host project root's (spec 3.1), as approved:
+	// read from the trust snapshot, never the live file, which the agent of
+	// a running sandbox may have changed since checkTrust (spec 3.4).
+	cfg, err := config.Load(p.GlobalConfig(), e.projectConfig(state), config.Env{
 		Home:        p.Home,
 		ConfigHome:  p.ConfigHome,
 		DataHome:    p.DataHome,

@@ -94,6 +94,17 @@ func (e *env) checkTrust() (trust.State, error) {
 	return trust.Trusted, nil
 }
 
+// projectConfig is the project config file to load for a checkTrust state:
+// the approved snapshot's copy when trusted, none otherwise. An Implicit
+// project had no .agent-sandbox/ when checked, so a config.toml that
+// appears later is unapproved and ignored.
+func (e *env) projectConfig(state trust.State) string {
+	if state != trust.Trusted {
+		return ""
+	}
+	return filepath.Join(e.trustStore().SnapshotDir(), "config.toml")
+}
+
 // interactive reports whether a person can answer a prompt.
 func interactive() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))

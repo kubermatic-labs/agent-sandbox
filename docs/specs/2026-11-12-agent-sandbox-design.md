@@ -123,7 +123,9 @@ If the container vanishes between step 6 and the exec (the idle race), retry ste
   mounted; the worktree's own checked-out copy is overlaid read-only like any deny-list path.
 - Merging: project scalars override global ones. Lists are concatenated and deduplicated. Maps are merged with the
   project key winning.
-- Config is **always read from the host project root**, never from a worktree's copy.
+- Config is **always read from the host project root**, never from a worktree's copy, and as approved: the project
+  config is loaded from the trust snapshot (section 3.4), not the live file, which the agent of a running sandbox may
+  have changed since the trust check.
 
 ```toml
 command       = ["claude"]          # default exec target
@@ -235,7 +237,8 @@ Build output is streamed to the terminal. A failed build exits non-zero and neve
 - The prompt needs a terminal on both stdin and stderr.
 - `agent-sandbox trust` runs the same prompt explicitly.
 - `agent-sandbox init` writes the files and records them as trusted.
-- If the project has no `.agent-sandbox/`, it is implicitly trusted (only global config applies).
+- If the project has no `.agent-sandbox/`, it is implicitly trusted (only global config applies). A `config.toml`
+  that appears after the check is ignored for that run.
 
 ### 3.5 Volumes and caches
 

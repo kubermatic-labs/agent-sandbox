@@ -74,10 +74,13 @@ type Env struct {
 }
 
 // Load reads the global and project config files (either may be missing),
-// validates each, and merges them over Defaults.
+// validates each, and merges them over Defaults. An empty path means none.
 func Load(globalPath, projectPath string, env Env) (Config, error) {
 	c := Defaults()
 	for _, p := range []string{globalPath, projectPath} {
+		if p == "" {
+			continue
+		}
 		f, err := decodeFile(p)
 		if err != nil {
 			return Config{}, err

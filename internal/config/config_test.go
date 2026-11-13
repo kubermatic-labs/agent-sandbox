@@ -179,3 +179,13 @@ func TestAllowDomainsWithDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadEmptyPathMeansNone(t *testing.T) {
+	c, err := Load("", "", Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(Defaults(), c); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}

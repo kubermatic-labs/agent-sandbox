@@ -105,8 +105,8 @@ RUN dnf -y install golang && dnf clean all
 
 `.agent-sandbox/` comes with the repository, so it is untrusted until you approve it. When it is new or changed,
 agent-sandbox shows a diff and the security-relevant settings and asks; without a terminal it refuses with
-`run 'agent-sandbox trust'`. The project image is built from the approved copy, never from the live directory.
-Symlinks are not allowed in `.agent-sandbox/`.
+`run 'agent-sandbox trust'`. The project image is built and `config.toml` is read from the approved copy, never
+from the live directory. Symlinks are not allowed in `.agent-sandbox/`.
 
 ## Network modes
 
