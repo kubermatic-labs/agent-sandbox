@@ -317,19 +317,22 @@ podman run -d
 
 ### 4.2 `_init` (PID 1)
 
-1. Gather inputs from the container's network namespace: the resolver addresses in `/etc/resolv.conf`, and the
+1. Create `/run/asb/ready` empty (truncating any stale copy) and keep its descriptor. An empty file means "not
+   ready".
+2. Gather inputs from the container's network namespace: the resolver addresses in `/etc/resolv.conf`, and the
    address and prefix length of every interface other than `lo`. Pasta copies the host's addresses into the container
    with their prefix lengths (verified: the container gets `192.168.18.0/24` as a link route), so these prefixes are
    the host's on-link LAN subnets, including global IPv6 /64s. Then build and apply the nftables ruleset for the
    network mode via netlink (`github.com/google/nftables`). The image does not need `nft`.
-2. In allowlist mode, start the proxy child (`agent-sandbox _proxy`) as uid/gid 65533.
-3. Create `/run/asb/ready`.
+3. In allowlist mode, start the proxy child (`agent-sandbox _proxy`) as uid/gid 65533.
 4. Drop privileges permanently: setgroups([]), setresgid/setresuid to 65534, clear the permitted, effective,
    inheritable and ambient capability sets on every thread, set `PR_SET_NO_NEW_PRIVS`, then verify the result in
    `/proc/self/status` and exit non-zero on any mismatch. The bounding set stays: dropping from it needs
    `CAP_SETPCAP`, which the container does not grant, and PID 1 never execs afterwards. The agent's UID then cannot signal it, kill it,
    or change the rules. PID 1 and the proxy use different UIDs, so a compromised proxy cannot signal PID 1 either.
-5. Supervise:
+5. Write `ready` into `/run/asb/ready` through the descriptor from step 1. This is the last setup step: after the
+   drop PID 1 cannot create files in `/run/asb`, and the container has no `CAP_CHOWN`, hence the early descriptor.
+6. Supervise:
    - reap zombies (PID 1 duty);
    - every 5 s, scan `/proc`. A session is any process other than PID 1 and the proxy's process tree;
    - when no session process has existed for a continuous `idle_timeout`, exit 0. The exited container is removed by
@@ -337,10 +340,10 @@ podman run -d
    - if the proxy exits, exit non-zero (fail closed rather than run without a proxy);
    - SIGTERM: exit promptly (used by `stop`).
 
-If step 1 or 2 fails, exit non-zero before writing `ready`. **Never run unfiltered.**
+If any of steps 1 to 4 fails, exit non-zero before writing `ready`. **Never run unfiltered.**
 
-The wrapper waits for ready by polling `podman exec <c> test -e /run/asb/ready` (or the equivalent) for up to 10 s.
-On timeout, or if the container exits first, it prints `podman logs`, then stops and removes the container.
+The wrapper waits for ready by polling `podman exec <c> test -s /run/asb/ready` (non-empty, not just present) for up
+to 10 s. On timeout, or if the container exits first, it prints `podman logs`, then stops and removes the container.
 
 ### 4.3 Sessions
 

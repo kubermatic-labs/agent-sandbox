@@ -264,7 +264,7 @@ func TestReadyWaitPolls(t *testing.T) {
 	if _, err := s.Exec(context.Background(), execArgv); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(f.CallsWith("exec", "asb-x-default", "test", "-e", "/run/asb/ready")); n != 4 {
+	if n := len(f.CallsWith("exec", "asb-x-default", "test", "-s", "/run/asb/ready")); n != 4 {
 		t.Errorf("ready probes = %d, want 4", n)
 	}
 }

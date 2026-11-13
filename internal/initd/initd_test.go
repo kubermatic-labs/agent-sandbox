@@ -110,3 +110,22 @@ func TestMainRefusesOutsidePID1(t *testing.T) {
 		t.Errorf("log = %q", log.String())
 	}
 }
+
+// The wrapper waits for a non-empty ready file (test -s): _init creates it
+// empty first and marks it only after the privilege drop.
+func TestMarkReadyMakesFileNonEmpty(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "ready")
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(p); fi.Size() != 0 {
+		t.Fatal("not empty before markReady")
+	}
+	if err := markReady(f); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(p); fi.Size() == 0 {
+		t.Error("still empty after markReady")
+	}
+}

@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	// ReadyFile is created once setup is complete.
+	// ReadyFile is non-empty once setup is complete (see setup).
 	ReadyFile = "/run/asb/ready"
 	// NobodyID is the uid and gid PID 1 drops to.
 	NobodyID = 65534
@@ -103,12 +103,27 @@ func Main(o Options, log io.Writer) int {
 	return supervise(o, proxyPID, sigs, log)
 }
 
-// setup applies the network rules, starts the proxy (allowlist mode), writes
-// the ready file and drops privileges. It returns the proxy's pid, or 0.
+// setup applies the network rules, starts the proxy (allowlist mode), drops
+// privileges and only then marks the sandbox ready. It returns the proxy's
+// pid, or 0.
+//
+// Readiness is a non-empty ReadyFile. The file is created empty, as root,
+// before anything else (truncating any stale copy), and its descriptor is
+// kept: after the drop PID 1 cannot create files in /run/asb, and the
+// container has no CAP_CHOWN to hand it the directory. Writing through the
+// descriptor after the verified drop makes readiness the very last step.
 func setup(o Options, log io.Writer) (int, error) {
 	if err := o.Validate(); err != nil {
 		return 0, err
 	}
+	if err := os.MkdirAll(filepath.Dir(o.ReadyFile), 0o755); err != nil {
+		return 0, err
+	}
+	ready, err := os.OpenFile(o.ReadyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("creating %s: %w", o.ReadyFile, err)
+	}
+	defer func() { _ = ready.Close() }()
 	// 1. Network rules. Open mode has none.
 	if o.Network != "open" {
 		in, err := netInputs(o)
@@ -137,18 +152,24 @@ func setup(o Options, log io.Writer) (int, error) {
 			return 0, err
 		}
 	}
-	// 3. Ready file.
-	if err := os.MkdirAll(filepath.Dir(o.ReadyFile), 0o755); err != nil {
-		return 0, err
-	}
-	if err := os.WriteFile(o.ReadyFile, nil, 0o644); err != nil {
-		return 0, err
-	}
-	// 4. Drop privileges for good.
+	// 3. Drop privileges for good.
 	if err := DropPrivileges(NobodyID, NobodyID); err != nil {
 		return 0, fmt.Errorf("dropping privileges: %w", err)
 	}
+	// 4. Ready, last.
+	if err := markReady(ready); err != nil {
+		return 0, fmt.Errorf("writing %s: %w", o.ReadyFile, err)
+	}
 	return proxyPID, nil
+}
+
+// markReady makes the ready file non-empty, through a descriptor opened
+// before the privilege drop.
+func markReady(f *os.File) error {
+	if _, err := f.WriteString("ready\n"); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 // startProxy starts `agent-sandbox _proxy` as ProxyID and waits until it

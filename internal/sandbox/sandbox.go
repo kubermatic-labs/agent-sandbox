@@ -126,7 +126,9 @@ func (s *Sandbox) waitReady(ctx context.Context) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		_, err := s.Podman.R.Output(ctx, "exec", s.Container, "test", "-e", initd.ReadyFile)
+		// Non-empty, not just present: _init creates it empty at the start of
+		// setup and writes it after the privilege drop.
+		_, err := s.Podman.R.Output(ctx, "exec", s.Container, "test", "-s", initd.ReadyFile)
 		if err == nil {
 			return nil
 		}
