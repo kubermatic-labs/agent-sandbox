@@ -6,7 +6,7 @@ Module: `k8c.io/agent-sandbox` (Go 1.27, single module)
 
 ## 1. Purpose and threat model
 
-`agent-sandbox` is a CLI wrapper around rootless podman. It runs AI coding agents (`claude`, `opencode`, `codex`, ...)
+`agent-sandbox` is a CLI wrapper around rootless podman. It runs AI coding agents (`claude`, `opencode`, `pi`, ...)
 in permissive mode, in a per-project container that can see only the project.
 
 The adversary is the agent itself, which may be wrong, prompt-injected, or overeager. The agent may do anything inside
@@ -201,7 +201,7 @@ tokens (section 11).
   base, and the build context is that directory. `~/.config/agent-sandbox/base/Containerfile` (the override location
   before there was a choice) is refused with an error rather than silently ignored.
 - Contents: git, ripgrep, fd, jq, curl, make, gcc, procps, less, ca-certificates, gh, python3, plus the agents
-  `claude`, `opencode` and `codex` **baked into the image with auto-update disabled** (for example
+  `claude`, `opencode` and `pi` **baked into the image with auto-update disabled** (for example
   `DISABLE_AUTOUPDATER=1` in the image env). Agents live in the image rather than the home volume, so an agent
   cannot replace its own binary persistently. The agents need Node.js >= 22.19, and each Containerfile fails the
   build on an older one. Debian 12's Node.js is too old, so the Debian and Ubuntu bases copy node and npm from the
@@ -450,6 +450,7 @@ These are overlaid read-only inside the mounted tree (project root or worktree) 
 .mcp.json
 .opencode/
 .codex/
+.pi/
 .envrc
 .vscode/
 .idea/

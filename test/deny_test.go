@@ -27,10 +27,10 @@ func (e *sandboxEnv) findingsFile() string {
 
 func TestDenyListIsReadOnly(t *testing.T) {
 	e := newProject(t, openNetwork)
-	for _, f := range []string{".envrc", ".claude/settings.json", ".vscode/settings.json", ".mcp.json", ".pre-commit-config.yaml", "mise.toml"} {
+	for _, f := range []string{".envrc", ".claude/settings.json", ".pi/settings.json", ".vscode/settings.json", ".mcp.json", ".pre-commit-config.yaml", "mise.toml"} {
 		e.writeFile(f, "original\n")
 	}
-	for _, target := range []string{".envrc", ".claude/settings.json", ".vscode/settings.json", ".vscode/tasks.json", ".mcp.json", ".pre-commit-config.yaml", "mise.toml"} {
+	for _, target := range []string{".envrc", ".claude/settings.json", ".pi/settings.json", ".pi/extensions/evil.ts", ".vscode/settings.json", ".vscode/tasks.json", ".mcp.json", ".pre-commit-config.yaml", "mise.toml"} {
 		if r := e.run(e.root, "", "--", "sh", "-c", "echo pwned > "+target); r.code == 0 {
 			t.Errorf("writing %s succeeded", target)
 		}

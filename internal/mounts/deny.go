@@ -24,6 +24,7 @@ var builtinDeny = []string{
 	".mcp.json",
 	".opencode",
 	".codex",
+	".pi",
 	".envrc",
 	".vscode",
 	".idea",
