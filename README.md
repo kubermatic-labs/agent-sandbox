@@ -1,6 +1,6 @@
 # agent-sandbox
 
-Run AI coding agents (`claude`, `opencode`, `codex`, ...) in permissive mode inside a per-project rootless podman
+Run AI coding agents (`claude`, `opencode`, `pi`, ...) in permissive mode inside a per-project rootless podman
 container that can see only the project.
 
 The agent may do anything inside the project. Outside it, it should be able to do as little as possible: no host
@@ -51,7 +51,7 @@ minutes. The sandbox keeps running between sessions and stops itself after `idle
 | `agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]` | run a session; the exit code is the command's |
 | `agent-sandbox init` | create `.agent-sandbox/{config.toml,Containerfile}` and trust them |
 | `agent-sandbox trust` | review `.agent-sandbox/` against the last approved version and approve it |
-| `agent-sandbox build [--no-cache] [--pull]` | rebuild images; `--pull` refreshes Fedora and the agents |
+| `agent-sandbox build [--no-cache] [--pull]` | rebuild images; `--pull` refreshes image and the agents |
 | `agent-sandbox status [--all]` | this project's sandboxes (`--all`: every project's, plus volumes) |
 | `agent-sandbox stop [-n NAME \| --all]` | stop a sandbox of this project now (`--all`: all of this project's) |
 | `agent-sandbox worktree list` | worktree-mode worktrees: branch, commits ahead, dirty, running |
