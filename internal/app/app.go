@@ -64,7 +64,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		return 1, err
 	}
 	// Fail closed: never run with less isolation than the config asks for.
-	if cfg.Network != "open" {
+	if cfg.Network == "allowlist" {
 		return 1, fmt.Errorf("network mode %q is not implemented in this build yet; set network = \"open\" in %s to use it", cfg.Network, p.GlobalConfig())
 	}
 

@@ -78,17 +78,21 @@ func TestIdleTrackerNeverUsed(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	ok := Options{Network: "open", Idle: time.Minute, UID: 1000}
-	if err := ok.Validate(); err != nil {
-		t.Errorf("valid options: %v", err)
+	for _, ok := range []Options{
+		{Network: "open", Idle: time.Minute, UID: 1000},
+		{Network: "restricted", Idle: time.Minute, UID: 1000, AllowCIDRs: []string{"10.0.0.1", "fd00::/8"}},
+	} {
+		if err := ok.Validate(); err != nil {
+			t.Errorf("valid options %+v: %v", ok, err)
+		}
 	}
 	for name, o := range map[string]Options{
-		"restricted not implemented": {Network: "restricted", Idle: time.Minute, UID: 1000},
-		"allowlist not implemented":  {Network: "allowlist", Idle: time.Minute, UID: 1000},
-		"unknown network":            {Network: "wide", Idle: time.Minute, UID: 1000},
-		"no idle":                    {Network: "open", UID: 1000},
-		"root uid":                   {Network: "open", Idle: time.Minute},
-		"nobody uid":                 {Network: "open", Idle: time.Minute, UID: NobodyID},
+		"bad allow cidr":            {Network: "restricted", Idle: time.Minute, UID: 1000, AllowCIDRs: []string{"10.0.0.0/33"}},
+		"allowlist not implemented": {Network: "allowlist", Idle: time.Minute, UID: 1000},
+		"unknown network":           {Network: "wide", Idle: time.Minute, UID: 1000},
+		"no idle":                   {Network: "open", UID: 1000},
+		"root uid":                  {Network: "open", Idle: time.Minute},
+		"nobody uid":                {Network: "open", Idle: time.Minute, UID: NobodyID},
 	} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)

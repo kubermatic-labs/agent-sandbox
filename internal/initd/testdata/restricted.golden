@@ -1,0 +1,32 @@
+table inet asb {
+	chain output {
+		type filter hook output priority filter; policy accept;
+		oifname "lo" accept
+		meta nfproto ipv6 icmpv6 type nd-router-solicit accept
+		meta nfproto ipv6 icmpv6 type nd-neighbor-solicit accept
+		meta nfproto ipv6 icmpv6 type nd-neighbor-advert accept
+		ip daddr 169.254.1.1 udp dport 53 accept
+		ip daddr 169.254.1.1 tcp dport 53 accept
+		ip daddr 10.0.0.5 accept
+		ip daddr 192.168.1.0/24 accept
+		ip6 daddr fd00::1 accept
+		ip daddr 0.0.0.0/8 reject with icmpx admin-prohibited
+		ip daddr 127.0.0.0/8 reject with icmpx admin-prohibited
+		ip daddr 10.0.0.0/8 reject with icmpx admin-prohibited
+		ip daddr 172.16.0.0/12 reject with icmpx admin-prohibited
+		ip daddr 192.168.0.0/16 reject with icmpx admin-prohibited
+		ip daddr 100.64.0.0/10 reject with icmpx admin-prohibited
+		ip daddr 169.254.0.0/16 reject with icmpx admin-prohibited
+		ip daddr 224.0.0.0/4 reject with icmpx admin-prohibited
+		ip daddr 255.255.255.255 reject with icmpx admin-prohibited
+		ip6 daddr ::1 reject with icmpx admin-prohibited
+		ip6 daddr fc00::/7 reject with icmpx admin-prohibited
+		ip6 daddr fe80::/10 reject with icmpx admin-prohibited
+		ip6 daddr ff00::/8 reject with icmpx admin-prohibited
+		ip6 daddr ::ffff:0.0.0.0/96 reject with icmpx admin-prohibited
+		ip6 daddr 64:ff9b::/96 reject with icmpx admin-prohibited
+		ip6 daddr 64:ff9b:1::/48 reject with icmpx admin-prohibited
+		ip daddr 203.0.113.0/24 reject with icmpx admin-prohibited
+		ip6 daddr 2001:db8:1:2::/64 reject with icmpx admin-prohibited
+	}
+}

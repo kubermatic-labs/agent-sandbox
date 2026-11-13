@@ -333,24 +333,32 @@ All modes use `--network pasta`. Restriction is enforced by nftables in the cont
 `output` hook (IPv4 and IPv6).
 
 - **open:** no rules. The host is reachable through `host.containers.internal` (section 11).
-- **restricted (default):** the *private set* is 127.0.0.0/8 (except via `lo`), 10.0.0.0/8, 172.16.0.0/12,
-  192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255, `::1` (except `lo`), `fc00::/7`,
-  `fe80::/10`, `ff00::/8`, `::ffff:0:0/96`, `64:ff9b::/96`, **plus the on-link prefix of every non-`lo` interface**
-  (from `_init` step 1). The interface prefixes cover LAN hosts with public IPv4 or global IPv6 addresses, and the
-  host's other global addresses on the same subnet, none of which the fixed ranges catch. Rules, in order:
-  1. accept DNS (udp/tcp 53) to pasta's DNS forwarding address only: the link-local (169.254.0.0/16) nameserver(s)
+- **restricted (default):** the *private set* is 0.0.0.0/8, 127.0.0.0/8 (except via `lo`), 10.0.0.0/8,
+  172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255, `::1` (except `lo`),
+  `fc00::/7`, `fe80::/10`, `ff00::/8`, `::ffff:0:0/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, **plus the on-link prefix
+  of every non-`lo` interface** (from `_init` step 1; prefixes already inside the fixed ranges are skipped). The
+  interface prefixes cover LAN hosts with public IPv4 or global IPv6 addresses, and the host's other global addresses
+  on the same subnet, none of which the fixed ranges catch. Rules, in order:
+  1. accept `oifname "lo"`;
+  2. accept ICMPv6 neighbor discovery (router solicit, neighbor solicit, neighbor advert). Rejecting `ff00::/8` and
+     `fe80::/10` would otherwise break IPv6 entirely; these messages cannot carry data to the LAN, and pasta answers
+     them itself;
+  3. accept DNS (udp/tcp 53) to pasta's DNS forwarding address only: the link-local (169.254.0.0/16) nameserver(s)
      in `/etc/resolv.conf`. Other nameservers podman lists there (for example the LAN router) are not accepted. If
      there is no link-local nameserver, `_init` fails;
-  2. accept `allow_cidrs`;
-  3. drop the private set;
-  4. accept everything else.
+  4. accept `allow_cidrs`;
+  5. reject the private set with ICMP admin-prohibited (`reject with icmpx admin-prohibited`). Reject, not drop: a
+     drop in the output hook leaves `connect()` hanging until the TCP timeout (verified), so every blocked
+     connection would stall the agent; reject fails it at once with "No route to host";
+  6. accept everything else (chain policy).
 
   `host.containers.internal`, the pasta gateway and the LAN are therefore unreachable unless listed in `allow_cidrs`.
+  `_init` prints the applied ruleset to `podman logs`.
 - **allowlist:** one container, no sidecar:
   - the proxy runs as uid 65533 on `127.0.0.1:3128`;
   - rules: accept `lo`; for `meta skuid 65533` (the proxy, including its DNS) apply the restricted rules above, so an
     allowed domain that resolves to a private or on-link address (DNS rebinding, a broad wildcard) still cannot reach
-    the host or LAN; for every other UID, accept only `127.0.0.1:3128` and drop the rest;
+    the host or LAN; for every other UID, accept only `127.0.0.1:3128` and reject the rest;
   - sessions get `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy` set to `http://127.0.0.1:3128`, and
     `NO_PROXY=localhost,127.0.0.1`;
   - the proxy is an HTTP CONNECT proxy (plain HTTP absolute-URI requests are also supported). It matches the target

@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"k8c.io/agent-sandbox/internal/config"
 )
 
 const (
@@ -32,9 +34,10 @@ type Options struct {
 	UID        int      // host uid the sessions run as
 	AllowCIDRs []string // restricted mode, milestone 3
 
-	ReadyFile string        // default ReadyFile
-	ProcDir   string        // default /proc
-	Interval  time.Duration // session scan interval, default 5s
+	ReadyFile  string        // default ReadyFile
+	ProcDir    string        // default /proc
+	ResolvConf string        // default /etc/resolv.conf
+	Interval   time.Duration // session scan interval, default 5s
 }
 
 func (o *Options) defaults() {
@@ -43,6 +46,9 @@ func (o *Options) defaults() {
 	}
 	if o.ProcDir == "" {
 		o.ProcDir = "/proc"
+	}
+	if o.ResolvConf == "" {
+		o.ResolvConf = "/etc/resolv.conf"
 	}
 	if o.Interval == 0 {
 		o.Interval = 5 * time.Second
@@ -53,8 +59,8 @@ func (o *Options) defaults() {
 // are refused, never run unfiltered.
 func (o Options) Validate() error {
 	switch o.Network {
-	case "open":
-	case "restricted", "allowlist":
+	case "open", "restricted":
+	case "allowlist":
 		return fmt.Errorf("network mode %q is not supported by this build", o.Network)
 	default:
 		return fmt.Errorf("unknown network mode %q", o.Network)
@@ -64,6 +70,11 @@ func (o Options) Validate() error {
 	}
 	if o.UID <= 0 || o.UID == NobodyID {
 		return fmt.Errorf("--uid %d is not a valid session uid", o.UID)
+	}
+	for _, c := range o.AllowCIDRs {
+		if _, err := config.ParseCIDR(c); err != nil {
+			return fmt.Errorf("--allow-cidr %q: %w", c, err)
+		}
 	}
 	return nil
 }
@@ -79,19 +90,29 @@ func Main(o Options, log io.Writer) int {
 	// Subscribe before setup so that a stop during setup is not lost.
 	sigs := make(chan os.Signal, 8)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGCHLD)
-	if err := setup(o); err != nil {
+	if err := setup(o, log); err != nil {
 		fmt.Fprintf(log, "agent-sandbox _init: %v\n", err)
 		return 1
 	}
 	return supervise(o, sigs, log)
 }
 
-func setup(o Options) error {
+func setup(o Options, log io.Writer) error {
 	if err := o.Validate(); err != nil {
 		return err
 	}
-	// 1. Network rules: open mode has none. Restricted and allowlist modes
-	//    are refused by Validate until they are implemented.
+	// 1. Network rules. Open mode has none; allowlist is refused by
+	//    Validate until it is implemented.
+	if o.Network == "restricted" {
+		rules, err := restrictedRules(o)
+		if err != nil {
+			return err
+		}
+		if err := applyRules(rules); err != nil {
+			return fmt.Errorf("applying nftables rules: %w (is nf_tables available on the host? try: sudo modprobe nf_tables)", err)
+		}
+		fmt.Fprintf(log, "agent-sandbox _init: network rules:\n%s", Render(rules))
+	}
 	// 2. Allowlist proxy: not yet.
 	// 3. Ready file.
 	if err := os.MkdirAll(filepath.Dir(o.ReadyFile), 0o755); err != nil {
@@ -134,6 +155,27 @@ func supervise(o Options, sigs <-chan os.Signal, log io.Writer) int {
 			}
 		}
 	}
+}
+
+// restrictedRules gathers the inputs from the container and builds the rules.
+func restrictedRules(o Options) ([]Rule, error) {
+	rc, err := os.ReadFile(o.ResolvConf)
+	if err != nil {
+		return nil, err
+	}
+	onLink, err := OnLinkPrefixes()
+	if err != nil {
+		return nil, fmt.Errorf("reading interface addresses: %w", err)
+	}
+	in := NetInputs{Resolvers: ParseResolvConf(rc), OnLink: onLink}
+	for _, c := range o.AllowCIDRs {
+		p, err := config.ParseCIDR(c)
+		if err != nil {
+			return nil, err
+		}
+		in.AllowCIDRs = append(in.AllowCIDRs, p)
+	}
+	return RestrictedRules(in)
 }
 
 // reap collects every exited child (PID 1 inherits orphans).

@@ -18,7 +18,7 @@ import (
 	"k8c.io/agent-sandbox/internal/project"
 )
 
-var bin string
+var bin, nftflushBin string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "asb-it-")
@@ -27,13 +27,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	bin = filepath.Join(dir, "agent-sandbox")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/agent-sandbox")
-	build.Dir = ".."
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	build.Stdout, build.Stderr = os.Stderr, os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "building agent-sandbox:", err)
-		os.Exit(1)
+	nftflushBin = filepath.Join(dir, "nftflush")
+	for out, pkg := range map[string]string{bin: "./cmd/agent-sandbox", nftflushBin: "./test/tools/nftflush"} {
+		build := exec.Command("go", "build", "-o", out, pkg)
+		build.Dir = ".."
+		build.Env = append(os.Environ(), "CGO_ENABLED=0")
+		build.Stdout, build.Stderr = os.Stderr, os.Stderr
+		if err := build.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "building", pkg+":", err)
+			os.Exit(1)
+		}
 	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
@@ -151,8 +154,8 @@ func TestUnknownPositionalRejected(t *testing.T) {
 	}
 }
 
-func TestRestrictedNetworkFailsClosed(t *testing.T) {
-	e := newProject(t, "")
+func TestAllowlistNetworkFailsClosed(t *testing.T) {
+	e := newProject(t, "network = \"allowlist\"\n")
 	r := e.run(e.root, "", "--", "true")
 	if r.code != 1 || !strings.Contains(r.stderr, "not implemented") {
 		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
