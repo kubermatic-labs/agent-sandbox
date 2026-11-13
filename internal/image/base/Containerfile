@@ -17,5 +17,5 @@ ENV DISABLE_AUTOUPDATER=1 \
 RUN npm install -g --no-fund --no-audit \
         @anthropic-ai/claude-code \
         @opencode/cli \
-        @openai/codex \
-    && npm cache clean --force
+        @earendil-works/pi-coding-agent && \
+    npm cache clean --force
