@@ -1,6 +1,7 @@
 package initd
 
 import (
+	"encoding/binary"
 	"flag"
 	"net/netip"
 	"os"
@@ -181,5 +182,42 @@ func TestAllRestrictedRulesTranslate(t *testing.T) {
 		if _, err := ruleExprs(r); err != nil {
 			t.Errorf("%s: %v", r, err)
 		}
+	}
+}
+
+func TestAllowlistRulesGolden(t *testing.T) {
+	rules, err := AllowlistRules(NetInputs{
+		Resolvers:  addrs("169.254.1.1"),
+		OnLink:     mustPrefixes("203.0.113.0/24"),
+		AllowCIDRs: mustPrefixes("10.0.0.5/32"),
+	}, 65533)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "allowlist", Render(rules))
+	for _, r := range rules {
+		if _, err := ruleExprs(r); err != nil {
+			t.Errorf("%s: %v", r, err)
+		}
+	}
+}
+
+func TestSKUIDExprs(t *testing.T) {
+	got, err := ruleExprs(Rule{MatchUID: true, UID: 65533, Verdict: Accept})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []expr.Any{
+		&expr.Meta{Key: expr.MetaKeySKUID, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binary.NativeEndian.AppendUint32(nil, 65533)},
+		&expr.Verdict{Kind: expr.VerdictAccept},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+	// The catch-all reject has no matchers at all.
+	got, err = ruleExprs(Rule{Verdict: Reject})
+	if err != nil || len(got) != 1 {
+		t.Errorf("catch-all: %v, %v", got, err)
 	}
 }

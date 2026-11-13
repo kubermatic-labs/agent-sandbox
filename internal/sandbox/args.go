@@ -87,7 +87,22 @@ func InitCommand(cfg config.Config, uid int) []string {
 	for _, c := range cfg.AllowCIDRs {
 		cmd = append(cmd, "--allow-cidr="+c)
 	}
+	if cfg.Network == "allowlist" {
+		for _, d := range cfg.AllowDomainsWithDefaults() {
+			cmd = append(cmd, "--allow-domain="+d)
+		}
+	}
 	return cmd
+}
+
+// ProxyEnv points sessions at the allowlist proxy (spec 4.4). Tools that
+// ignore it fail closed: nothing else is reachable.
+func ProxyEnv(addr string) []string {
+	u := "http://" + addr
+	return []string{
+		"HTTP_PROXY=" + u, "HTTPS_PROXY=" + u, "http_proxy=" + u, "https_proxy=" + u,
+		"NO_PROXY=localhost,127.0.0.1", "no_proxy=localhost,127.0.0.1",
+	}
 }
 
 // ExecInput is everything podman exec needs.

@@ -24,6 +24,8 @@ const (
 // Rule is one rule in the output chain of table inet asb. All set fields
 // must match.
 type Rule struct {
+	MatchUID   bool         // match the owning socket's uid (meta skuid)
+	UID        uint32       // the uid for MatchUID
 	OIF        string       // output interface name
 	Family     int          // 4 or 6; implied by Dst when that is set
 	Dst        netip.Prefix // destination prefix
@@ -110,6 +112,28 @@ func RestrictedRules(in NetInputs) ([]Rule, error) {
 	return rules, nil
 }
 
+// AllowlistRules builds the allowlist-mode rules (spec 4.4): loopback and
+// NDP for everyone; for the proxy's uid, the restricted rules and then
+// accept; everything else is rejected. Sessions therefore reach nothing but
+// loopback, where the proxy listens; they cannot even resolve names.
+func AllowlistRules(in NetInputs, proxyUID uint32) ([]Rule, error) {
+	restricted, err := RestrictedRules(in)
+	if err != nil {
+		return nil, err
+	}
+	var rules []Rule
+	for _, r := range restricted {
+		if r.OIF != "lo" && r.ICMPv6Type == 0 {
+			r.MatchUID, r.UID = true, proxyUID
+		}
+		rules = append(rules, r)
+	}
+	return append(rules,
+		Rule{MatchUID: true, UID: proxyUID, Verdict: Accept},
+		Rule{Verdict: Reject},
+	), nil
+}
+
 // dedupe masks, unmaps and deduplicates prefixes, keeping order.
 func dedupe(ps []netip.Prefix) []netip.Prefix {
 	var out []netip.Prefix
@@ -156,6 +180,9 @@ var icmpv6Names = map[uint8]string{133: "nd-router-solicit", 135: "nd-neighbor-s
 // String renders the rule in nft syntax.
 func (r Rule) String() string {
 	var parts []string
+	if r.MatchUID {
+		parts = append(parts, fmt.Sprintf("meta skuid %d", r.UID))
+	}
 	if r.OIF != "" {
 		parts = append(parts, fmt.Sprintf("oifname %q", r.OIF))
 	}

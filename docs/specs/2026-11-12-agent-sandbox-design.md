@@ -137,8 +137,9 @@ git_user_name  = ""                 # worktree mode commit identity; default "ag
 git_user_email = ""                 # default "agent-sandbox@localhost"
 ```
 
-The built-in global defaults for `allow_domains` cover only the agent API and auth endpoints (`api.anthropic.com`,
-`claude.ai`, `console.anthropic.com`, plus the opencode/codex API endpoints, which the implementer looks up and pins).
+The built-in global defaults for `allow_domains` cover only the agent API and auth endpoints: `api.anthropic.com`,
+`claude.ai`, `console.anthropic.com` (Claude Code); `api.openai.com`, `auth.openai.com`, `chatgpt.com` (codex);
+`opencode.ai`, `models.dev` (opencode's service and model catalog). They live in `internal/config/domains.go`.
 Keep the list in one Go file so it is easy to audit. Telemetry endpoints are excluded on purpose. Shared third-party
 services such as `sentry.io` are open exfiltration channels, because anyone can create a project there. Sessions set
 `DISABLE_TELEMETRY=1` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` so agents do not hang on blocked telemetry.
@@ -374,14 +375,21 @@ All modes use `--network pasta`. Restriction is enforced by nftables in the cont
   `_init` prints the applied ruleset to `podman logs`.
 - **allowlist:** one container, no sidecar:
   - the proxy runs as uid 65533 on `127.0.0.1:3128`;
-  - rules: accept `lo`; for `meta skuid 65533` (the proxy, including its DNS) apply the restricted rules above, so an
-    allowed domain that resolves to a private or on-link address (DNS rebinding, a broad wildcard) still cannot reach
-    the host or LAN; for every other UID, accept only `127.0.0.1:3128` and reject the rest;
+  - rules: accept `lo` and ICMPv6 neighbor discovery for everyone; for `meta skuid 65533` (the proxy, including its
+    DNS) apply the restricted rules above and then accept, so an allowed domain that resolves to a private or on-link
+    address (DNS rebinding, a broad wildcard) still cannot reach the host or LAN; reject everything else. Sessions
+    therefore reach only loopback, where the proxy listens: they cannot resolve names or connect anywhere directly;
   - sessions get `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy` set to `http://127.0.0.1:3128`, and
-    `NO_PROXY=localhost,127.0.0.1`;
-  - the proxy is an HTTP CONNECT proxy (plain HTTP absolute-URI requests are also supported). It matches the target
-    host against `allow_domains` (exact match, or a `*.` suffix match) and returns 403 otherwise. There is no TLS
-    interception. Connections to IP literals are denied unless the IP is listed in `allow_cidrs`.
+    `NO_PROXY`/`no_proxy=localhost,127.0.0.1`;
+  - the proxy is an HTTP CONNECT proxy (plain HTTP absolute-URI requests are also forwarded, minus hop-by-hop
+    headers). It matches the target host against `allow_domains` plus the built-in defaults: exact match
+    (case-insensitive, trailing dot ignored), or `*.suffix`, which matches subdomains only, not `suffix` itself. Other
+    hosts get 403, failed upstream connections 502; denials are logged to `podman logs`. There is no TLS
+    interception. Connections to IP literals are denied unless the IP is in `allow_cidrs`;
+  - `_init` starts the proxy as uid/gid 65533 with no supplementary groups and no capabilities (it execs as a
+    non-root uid with no ambient set, under no_new_privs), waits up to 5 s for it to listen, and exits non-zero if
+    the proxy ever exits, so the sandbox never runs without it. The proxy is not counted as a session. `_proxy`
+    refuses to run as root;
   - tools that ignore the proxy fail closed, by design.
 
 ## 5. Git modes

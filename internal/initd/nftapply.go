@@ -49,6 +49,9 @@ func cmpEq(data []byte) *expr.Cmp {
 // ruleExprs translates a Rule into nftables expressions.
 func ruleExprs(r Rule) ([]expr.Any, error) {
 	var e []expr.Any
+	if r.MatchUID {
+		e = append(e, &expr.Meta{Key: expr.MetaKeySKUID, Register: 1}, cmpEq(binary.NativeEndian.AppendUint32(nil, r.UID)))
+	}
 	if r.OIF != "" {
 		if len(r.OIF) >= unix.IFNAMSIZ {
 			return nil, fmt.Errorf("interface name %q too long", r.OIF)

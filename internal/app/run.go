@@ -13,6 +13,7 @@ import (
 	"k8c.io/agent-sandbox/internal/fspath"
 	"k8c.io/agent-sandbox/internal/hostgit"
 	"k8c.io/agent-sandbox/internal/image"
+	"k8c.io/agent-sandbox/internal/initd"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
@@ -59,10 +60,6 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	})
 	if err != nil {
 		return 1, err
-	}
-	// Fail closed: never run with less isolation than the config asks for.
-	if cfg.Network == "allowlist" {
-		return 1, fmt.Errorf("network mode %q is not implemented in this build yet", cfg.Network)
 	}
 	statePath := scan.StatePath(p.DataDir, proj.ID)
 	if o.Strict || cfg.Strict {
@@ -154,7 +151,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		GID:       os.Getgid(),
 		Workdir:   workdir(e.cwd, proj.Root, tree),
 		TTY:       term.IsTerminal(int(os.Stdin.Fd())),
-		Env:       sandbox.SessionEnv(cfg.Env, append(plan.Env, gitEnv...)),
+		Env:       sandbox.SessionEnv(cfg.Env, sessionEnv(cfg, plan, gitEnv)),
 		Cmd:       command,
 	})
 
@@ -282,4 +279,14 @@ func workdir(cwd, root, tree string) string {
 		return tree
 	}
 	return w
+}
+
+// sessionEnv is the wrapper's own session env: cache presets, git settings
+// in worktree mode, and the proxy in allowlist mode.
+func sessionEnv(cfg config.Config, plan mounts.Plan, gitEnv []string) []string {
+	env := append(append([]string{}, plan.Env...), gitEnv...)
+	if cfg.Network == "allowlist" {
+		env = append(env, sandbox.ProxyEnv(initd.ProxyAddr)...)
+	}
+	return env
 }

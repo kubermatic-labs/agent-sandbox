@@ -168,14 +168,6 @@ func TestUnknownPositionalRejected(t *testing.T) {
 	}
 }
 
-func TestAllowlistNetworkFailsClosed(t *testing.T) {
-	e := newProject(t, "network = \"allowlist\"\n")
-	r := e.run(e.root, "", "--", "true")
-	if r.code != 1 || !strings.Contains(r.stderr, "not implemented") {
-		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
-	}
-}
-
 func TestProjectWritableGitReadOnly(t *testing.T) {
 	e := newProject(t, openNetwork)
 	e.mustRun(e.root, "", "--", "sh", "-c", "echo hi > file.txt")

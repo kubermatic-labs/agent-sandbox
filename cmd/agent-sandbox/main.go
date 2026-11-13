@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8c.io/agent-sandbox/internal/app"
+	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/initd"
+	"k8c.io/agent-sandbox/internal/proxy"
 )
 
 type (
@@ -76,7 +79,7 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
 	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
 	root.Flags().BoolVar(&gc, "gc", false, "worktree mode: run git gc on the host first, so the agent cannot touch unpacked objects")
-	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code))
+	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code), newProxyCmd())
 	return root
 }
 
@@ -95,7 +98,38 @@ func newInitCmd(code *int) *cobra.Command {
 	cmd.Flags().StringVar(&o.Network, "network", "", "network mode")
 	cmd.Flags().DurationVar(&o.Idle, "idle", 0, "exit after this long without a session")
 	cmd.Flags().IntVar(&o.UID, "uid", 0, "host uid the sessions run as")
-	cmd.Flags().StringArrayVar(&o.AllowCIDRs, "allow-cidr", nil, "extra reachable CIDR (restricted mode)")
+	cmd.Flags().StringArrayVar(&o.AllowCIDRs, "allow-cidr", nil, "extra reachable CIDR")
+	cmd.Flags().StringArrayVar(&o.AllowDomains, "allow-domain", nil, "allowlist mode: allowed host")
+	return cmd
+}
+
+// newProxyCmd is the allowlist proxy (spec 4.4), started by _init as its
+// own uid. Hidden: users never run it.
+func newProxyCmd() *cobra.Command {
+	var listen string
+	var domains, cidrs []string
+	cmd := &cobra.Command{
+		Use:    "_proxy",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if os.Getuid() == 0 {
+				return errors.New("_proxy must not run as root")
+			}
+			p := proxy.Policy{Domains: domains}
+			for _, c := range cidrs {
+				prefix, err := config.ParseCIDR(c)
+				if err != nil {
+					return err
+				}
+				p.CIDRs = append(p.CIDRs, prefix)
+			}
+			return proxy.ListenAndServe(listen, proxy.New(p, cmd.ErrOrStderr()))
+		},
+	}
+	cmd.Flags().StringVar(&listen, "listen", initd.ProxyAddr, "listen address")
+	cmd.Flags().StringArrayVar(&domains, "allow-domain", nil, "allowed host: exact, or *.suffix")
+	cmd.Flags().StringArrayVar(&cidrs, "allow-cidr", nil, "allowed IP literal range")
 	return cmd
 }
 

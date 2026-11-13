@@ -157,3 +157,31 @@ func TestGitSessionEnv(t *testing.T) {
 		t.Errorf("overrides: %q", got)
 	}
 }
+
+func TestInitCommandAllowlist(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Network = "allowlist"
+	cfg.AllowDomains = []string{"*.example.com"}
+	got := InitCommand(cfg, 1000)
+	if !slices.Contains(got, "--network=allowlist") || !slices.Contains(got, "--allow-domain=api.anthropic.com") ||
+		got[len(got)-1] != "--allow-domain=*.example.com" {
+		t.Errorf("InitCommand = %q", got)
+	}
+	cfg.Network = "restricted"
+	for _, a := range InitCommand(cfg, 1000) {
+		if strings.HasPrefix(a, "--allow-domain") {
+			t.Errorf("restricted mode got %q", a)
+		}
+	}
+}
+
+func TestProxyEnv(t *testing.T) {
+	want := []string{
+		"HTTP_PROXY=http://127.0.0.1:3128", "HTTPS_PROXY=http://127.0.0.1:3128",
+		"http_proxy=http://127.0.0.1:3128", "https_proxy=http://127.0.0.1:3128",
+		"NO_PROXY=localhost,127.0.0.1", "no_proxy=localhost,127.0.0.1",
+	}
+	if diff := cmp.Diff(want, ProxyEnv("127.0.0.1:3128")); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}

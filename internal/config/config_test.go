@@ -166,3 +166,16 @@ func TestCheckSecrets(t *testing.T) {
 		t.Error("directory accepted as secrets file")
 	}
 }
+
+func TestAllowDomainsWithDefaults(t *testing.T) {
+	c := Config{AllowDomains: []string{"api.anthropic.com", "*.example.com"}}
+	got := c.AllowDomainsWithDefaults()
+	if got[0] != "api.anthropic.com" || got[len(got)-1] != "*.example.com" || len(got) != len(DefaultAllowDomains)+1 {
+		t.Errorf("got %q", got)
+	}
+	for _, d := range DefaultAllowDomains {
+		if !domainRE.MatchString(d) {
+			t.Errorf("default %q is not a valid allow_domains entry", d)
+		}
+	}
+}
