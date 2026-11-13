@@ -130,3 +130,24 @@ func TestSubmoduleGitFileNotReported(t *testing.T) {
 		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 	}
 }
+
+func TestGitIncludeIsProtected(t *testing.T) {
+	e := newProject(t, openNetwork)
+	e.writeFile(".gitconfig", "[user]\n\tname = original\n")
+	for _, inc := range []string{"../.gitconfig", "../conf/missing.inc"} {
+		if out, err := exec.Command("git", "-C", e.root, "config", "--add", "include.path", inc).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	for _, target := range []string{".gitconfig", "conf/missing.inc"} {
+		if r := e.run(e.root, "", "--", "sh", "-c", "printf '[core]\\n\\tfsmonitor = ./evil.sh\\n' >> "+target); r.code == 0 {
+			t.Errorf("writing git config include %s succeeded", target)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(e.root, ".gitconfig")); string(b) != "[user]\n\tname = original\n" {
+		t.Errorf(".gitconfig changed on the host: %q", b)
+	}
+	if b, err := os.ReadFile(filepath.Join(e.root, "conf", "missing.inc")); err != nil || len(b) != 0 {
+		t.Errorf("missing include not created empty on the host: %q, %v", b, err)
+	}
+}

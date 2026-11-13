@@ -153,3 +153,20 @@ func TestRepoConfigAndHooksPaths(t *testing.T) {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
+
+func TestIncludesInside(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(t.TempDir(), "proj")
+	write(t, filepath.Join(home, ".gitconfig"), "[include]\n\tpath = ~/extra.conf\n")
+	write(t, filepath.Join(root, ".git", "config"), "[include]\n\tpath = ../.gitconfig\n[includeIf \"gitdir:/x/\"]\n\tpath = ../conf/missing.inc\n[include]\n\tpath = /etc/elsewhere\n[include]\n\tpath = local.inc\n")
+	write(t, filepath.Join(root, ".gitconfig"), "[include]\n\tpath = nested.inc\n")
+	cfg, err := RepoConfig(root, Env{Home: home, ConfigHome: filepath.Join(home, ".config")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Missing targets count too; targets outside root do not.
+	want := []string{".gitconfig", "nested.inc", "conf/missing.inc", ".git/local.inc"}
+	if diff := cmp.Diff(want, IncludesInside(cfg, root)); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}

@@ -16,7 +16,8 @@ import (
 // "section.name" or "section.subsection.name", with section and name
 // lowercased and the subsection kept as written.
 type Config struct {
-	entries []entry
+	entries  []entry
+	includes []string
 }
 
 type entry struct{ key, value string }
@@ -47,6 +48,13 @@ func (c Config) All(key string) []string {
 		}
 	}
 	return out
+}
+
+// Includes returns every include.path and includeIf.*.path target, as a
+// clean absolute path, in the order they were followed, whether or not the
+// file exists: host git reads a missing include as soon as it appears.
+func (c Config) Includes() []string {
+	return c.includes
 }
 
 // Get returns the last value of key, as git does.
@@ -123,6 +131,7 @@ func (c *Config) parseFile(path, home string, depth int) error {
 			case !filepath.IsAbs(inc):
 				inc = filepath.Join(filepath.Dir(path), inc)
 			}
+			c.includes = append(c.includes, filepath.Clean(inc))
 			if err := c.parseFile(inc, home, depth+1); err != nil {
 				return err
 			}

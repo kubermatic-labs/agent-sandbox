@@ -133,8 +133,8 @@ has no capabilities and cannot change them.
 In both modes these are read-only inside the sandbox when they exist: `.agent-sandbox/`, `.git`, `.envrc`,
 `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks`, `.mcp.json`, `.opencode`, `.codex`,
 `.vscode`, `.idea`, `.husky`, `.pre-commit-config.yaml`, `lefthook.yml`, `mise.toml`, `.nvim.lua`, `.exrc`, the
-directory `core.hooksPath` points to, and `readonly` from the config. A symlinked entry stops the sandbox from
-starting.
+directory `core.hooksPath` points to, git config files pulled in with `include.path`/`includeIf` (created empty if
+missing), and `readonly` from the config. A symlinked entry stops the sandbox from starting.
 
 ## After each session
 

@@ -110,3 +110,23 @@ func HooksPathsInside(cfg Config, root, home string) []string {
 	}
 	return out
 }
+
+// IncludesInside returns every include target, from any config level, that
+// lies inside root (a real path), as root-relative paths. Host git reads
+// these files, so an agent that could write one could set core.fsmonitor,
+// core.pager or an alias that runs on the host. A target outside root that
+// resolves into it through a symlink is returned as its resolved path.
+func IncludesInside(cfg Config, root string) []string {
+	var out []string
+	for _, p := range cfg.Includes() {
+		if !fspath.Within(p, root) {
+			p = fspath.Real(p)
+		}
+		if p == root || !fspath.Within(p, root) {
+			continue
+		}
+		rel, _ := filepath.Rel(root, p)
+		out = append(out, rel)
+	}
+	return out
+}

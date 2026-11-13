@@ -430,6 +430,7 @@ mise.toml
 .nvim.lua
 .exrc
 <core.hooksPath>          (if set in <root>/.git/config and it points inside the mounted tree)
+<git config includes>     (include.path / includeIf.*.path targets inside the mounted tree)
 ```
 
 The added entries are files the host runs without the user deliberately running project code: hook frameworks run on
@@ -440,7 +441,10 @@ the host commit (which in `ro` mode is where commits happen), and `mise`/editors
 `core.hooksPath` value from any level that resolves inside the project is added (relative values resolve against the
 project root, as git does), not just the effective one: over-approximating is the safe side. A configured hooks
 directory that does not exist yet is created empty on the host, so it can be overlaid: host git runs whatever would
-appear there.
+appear there. Every `include.path` and `includeIf.*.path` target from any level that resolves inside the project
+is added as well, unless an entry already covers it: host git reads those files, so a writable one could set
+`core.fsmonitor`, `core.pager` or an alias that runs on the host. A missing include target is created empty for the
+same reason.
 
 A deny-list path reached through a symlink (the path itself or a parent) is refused and the sandbox does not start.
 A bind mount follows symlinks, so overlaying `.envrc -> ~/.ssh/id_ed25519` would expose the target inside the
@@ -582,7 +586,7 @@ internal/sandbox     # ensure-running, flock, exec, ready wait, stale detection
 internal/initd       # _init: nftables, privilege drop, supervisor, reaper
 internal/proxy       # _proxy: CONNECT allowlist proxy
 internal/scan        # post-session scan (nested .git, unprotected deny-list paths) + state
-internal/hostgit     # hardened host git runner, .git/config parser (hooksPath, refStorage, worktreeConfig)
+internal/hostgit     # hardened host git runner, .git/config parser (hooksPath, includes, refStorage, worktreeConfig)
 ```
 
 - Build: `CGO_ENABLED=0 go build -o dist/agent-sandbox ./cmd/agent-sandbox`.
@@ -596,7 +600,7 @@ internal/hostgit     # hardened host git runner, .git/config parser (hooksPath, 
 - project root discovery (a `.git` dir, a `.git` file, none), ID hashing, cwd mapping;
 - config merging, validation and mount-source refusal (including symlink tricks, ancestors of the project root and
   data dir, `$XDG_RUNTIME_DIR`, rw dotfiles under `$HOME`), reserved `env` keys;
-- `.git/config` parsing: `core.hooksPath` (relative, absolute, via `[include]`), `extensions.refStorage`;
+- `.git/config` parsing: `core.hooksPath` (relative, absolute, via `[include]`), include targets inside the project, `extensions.refStorage`;
 - trust hashing (order, mode and content sensitivity) and the snapshot diff;
 - mount plans: golden files of the full `podman run` argv for ro and worktree mode, for each network mode;
 - nftables rulesets: golden per mode, including `allow_cidrs`, on-link prefixes (IPv4 and global IPv6), resolver

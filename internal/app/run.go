@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"golang.org/x/term"
 
@@ -187,8 +190,8 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	return code, nil
 }
 
-// denyList is the built-in deny-list plus core.hooksPath targets inside the
-// project and config readonly. A hooksPath directory that does not exist yet
+// denyList is the built-in deny-list plus core.hooksPath targets and git
+// config include files inside the project, and config readonly. A hooksPath directory that does not exist yet
 // is created empty, so it can be overlaid: git on the host runs whatever the
 // agent would put there.
 func (e *env) denyList(cfg config.Config, tree string) ([]string, error) {
@@ -206,7 +209,42 @@ func (e *env) denyList(cfg config.Config, tree string) ([]string, error) {
 			return nil, fmt.Errorf("creating core.hooksPath %s: %w", dir, err)
 		}
 	}
-	return mounts.DenyList(hooks, cfg.ReadOnly), nil
+	deny := mounts.DenyList(hooks, cfg.ReadOnly)
+	includes, err := gitIncludes(hostgit.IncludesInside(gitCfg, tree), tree, deny)
+	if err != nil {
+		return nil, err
+	}
+	return mounts.DenyList(deny, includes), nil
+}
+
+// gitIncludes returns the git config include targets inside the project
+// that no deny-list entry covers yet. A missing target is created empty, so
+// it can be overlaid: host git reads whatever would appear there.
+func gitIncludes(rels []string, tree string, deny []string) ([]string, error) {
+	var out []string
+	for _, rel := range rels {
+		path := filepath.Join(tree, rel)
+		if slices.ContainsFunc(deny, func(d string) bool { return fspath.Within(path, filepath.Join(tree, d)) }) {
+			continue
+		}
+		if fspath.Real(path) != path {
+			return nil, fmt.Errorf("git config include %s is a symlink or lies under one; agent-sandbox cannot protect it read-only", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, fmt.Errorf("creating git config include %s: %w", path, err)
+		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		switch {
+		case err == nil:
+			if err := f.Close(); err != nil {
+				return nil, err
+			}
+		case !errors.Is(err, fs.ErrExist):
+			return nil, fmt.Errorf("creating git config include %s: %w", path, err)
+		}
+		out = append(out, rel)
+	}
+	return out, nil
 }
 
 // postScan runs the post-session scan (spec 7) and records and prints its
