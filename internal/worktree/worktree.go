@@ -153,8 +153,18 @@ func create(ctx context.Context, git hostgit.Runner, root, path, branch string) 
 
 // copyEntries copies worktree_copy entries from root into a new worktree.
 // Missing entries and anything reached through a symlink are skipped with
-// a warning; symlinks inside entries are skipped too.
+// a warning; symlinks inside entries are skipped too. The destination is a
+// checkout of the agent's branch, which may hold symlinks the agent
+// committed, so writes never go through a symlink there either: a
+// destination that is or lies under one is refused, and all writes go
+// through an os.Root at the worktree, which cannot be escaped.
 func copyEntries(root, wt string, entries []string, log io.Writer) {
+	r, err := os.OpenRoot(wt)
+	if err != nil {
+		fmt.Fprintf(log, "agent-sandbox: worktree_copy: %v, nothing copied\n", err)
+		return
+	}
+	defer func() { _ = r.Close() }()
 	for _, rel := range entries {
 		src := filepath.Join(root, rel)
 		if _, err := os.Lstat(src); err != nil {
@@ -165,13 +175,15 @@ func copyEntries(root, wt string, entries []string, log io.Writer) {
 			fmt.Fprintf(log, "agent-sandbox: worktree_copy: %s is a symlink or lies under one, skipped\n", rel)
 			continue
 		}
-		if err := copyTree(src, filepath.Join(wt, rel), log); err != nil {
+		if err := copyTree(src, wt, r, filepath.Clean(rel), log); err != nil {
 			fmt.Fprintf(log, "agent-sandbox: worktree_copy: %s: %v\n", rel, err)
 		}
 	}
 }
 
-func copyTree(src, dst string, log io.Writer) error {
+// copyTree copies src to dst, a path relative to the worktree wt (a real
+// path) that r is opened at.
+func copyTree(src, wt string, r *os.Root, dst string, log io.Writer) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -181,22 +193,25 @@ func copyTree(src, dst string, log io.Writer) error {
 			return err
 		}
 		target := filepath.Join(dst, rel)
+		if abs := filepath.Join(wt, target); fspath.Real(abs) != abs {
+			return fmt.Errorf("%s in the worktree is a symlink or lies under one (from the branch); not copied", target)
+		}
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 		switch {
 		case d.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
+			return r.MkdirAll(target, info.Mode().Perm())
 		case info.Mode().IsRegular():
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := r.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(target, b, info.Mode().Perm())
+			return r.WriteFile(target, b, info.Mode().Perm())
 		default:
 			fmt.Fprintf(log, "agent-sandbox: worktree_copy: %s is not a regular file, skipped\n", p)
 			return nil

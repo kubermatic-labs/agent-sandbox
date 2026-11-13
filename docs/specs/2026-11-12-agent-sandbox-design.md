@@ -467,7 +467,9 @@ that exists but was not overlaid, so creation is at least detected. Document the
    `<data>` is `~/.local/share/agent-sandbox`. If branch `asb/<name>` already exists, check it out instead of
    creating it.
 2. Copy each `worktree_copy` entry from `<root>` into the worktree. Skip missing entries with a warning, and never
-   follow symlinks out of the root.
+   follow symlinks out of the root. The destination side gets the same rule: an existing `asb/<name>` branch may hold
+   symlinks the agent committed, so an entry whose destination is or lies under a symlink in the checkout is refused
+   with a warning, and all writes go through an `os.Root` at the worktree.
 3. If the main config has `extensions.worktreeConfig=true`, create an empty `.git/worktrees/<name>/config.worktree`
    so it can be overlaid read-only.
 

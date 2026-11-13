@@ -189,3 +189,54 @@ func TestCopySkipsSymlinks(t *testing.T) {
 		t.Errorf("no symlink warning: %q", in.Log)
 	}
 }
+
+// The agent commits symlinks on its asb/ branch; when the worktree is
+// recreated from that branch, worktree_copy must not write through them.
+func TestCopyRefusesSymlinksFromBranch(t *testing.T) {
+	root := newRepo(t)
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "bashrc")
+	if err := os.WriteFile(victim, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Plant the symlinks on asb/default from a scratch worktree.
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	gitCmd(t, root, "worktree", "add", "-q", "-b", "asb/default", scratch)
+	if err := os.Symlink(victim, filepath.Join(scratch, ".env.local")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(scratch, "config")); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, scratch, "add", ".")
+	gitCmd(t, scratch, "commit", "-q", "-m", "plant")
+	gitCmd(t, root, "worktree", "remove", scratch)
+
+	for name, content := range map[string]string{".env.local": "SECRET=1\n", "config/app.env": "X=1\n", "ok.env": "OK=1\n"} {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in := input(t, root)
+	in.Copy = []string{".env.local", "config", "ok.env"}
+	w, err := Ensure(context.Background(), hostgit.Runner{}, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "original\n" {
+		t.Errorf("wrote through a file symlink: %q", b)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "app.env")); err == nil {
+		t.Error("wrote through a directory symlink")
+	}
+	if b, err := os.ReadFile(filepath.Join(w.Path, "ok.env")); err != nil || string(b) != "OK=1\n" {
+		t.Errorf("ordinary entry not copied: %q, %v", b, err)
+	}
+	if got := strings.Count(in.Log.(*bytes.Buffer).String(), "symlink or lies under one"); got != 2 {
+		t.Errorf("want 2 refusals, log: %q", in.Log)
+	}
+}
