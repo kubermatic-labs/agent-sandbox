@@ -113,7 +113,8 @@ from the live directory. Symlinks are not allowed in `.agent-sandbox/`.
 ## Network modes
 
 - **restricted** (default): the internet is reachable; the host, the LAN, link-local and private ranges, and the
-  host's on-link subnets (including global IPv6 /64s) are rejected. DNS goes only through pasta's forwarder.
+  host's on-link subnets (including global IPv6 /64s), and every address the host has on any interface, with its
+  subnet, are rejected. DNS goes only through pasta's forwarder.
   `allow_cidrs` opens exceptions. Blocked connections fail at once with "No route to host".
 - **allowlist**: sessions reach nothing but a proxy on `127.0.0.1:3128` (set as `HTTPS_PROXY`), which allows the
   agents' API and login endpoints plus `allow_domains` (`example.com`, or `*.example.com` for subdomains). There is no
@@ -155,6 +156,8 @@ agent-sandbox narrows what an agent can do; it does not make running one risk-fr
 - `allowlist` reduces exfiltration but does not stop it: the agent can send data through an allowed API, for example
   with an attacker's API key.
 - `open` mode can reach the host through `host.containers.internal`, and the LAN.
+- `restricted` and `allowlist` block the host's own addresses as they were when the sandbox started. An address the
+  host gains later (a VPN coming up, another network) stays reachable until the sandbox restarts (`stop`).
 - Protected paths that did not exist when the sandbox started are not protected; the post-session scan only detects
   them.
 - An approved project Containerfile runs its `RUN` steps on the host with podman's unrestricted build network. Review

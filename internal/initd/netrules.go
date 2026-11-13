@@ -46,6 +46,44 @@ type NetInputs struct {
 	Resolvers  []netip.Addr   // nameservers from /etc/resolv.conf
 	OnLink     []netip.Prefix // prefixes of every interface except lo
 	AllowCIDRs []netip.Prefix // allow_cidrs
+	// HostAddrs are the host's own interface addresses with their prefix
+	// lengths (--host-addr, gathered by the wrapper). The container only sees
+	// the interface pasta copied, but pasta connects from the host, so any
+	// other host address, and the LAN behind it, is reachable too.
+	HostAddrs []netip.Prefix
+}
+
+// Prefixes shorter than these are not rejected as a whole: rejecting a host
+// address's /4 would cut off a large part of the internet. The address
+// itself is always rejected.
+const (
+	minHostPrefix4 = 16
+	minHostPrefix6 = 32
+)
+
+// hostRejects returns, for each host address, the address and, unless it
+// is very wide, its on-link prefix.
+func hostRejects(addrs []netip.Prefix) []netip.Prefix {
+	var out []netip.Prefix
+	for _, p := range addrs {
+		if !p.IsValid() {
+			continue
+		}
+		a := p.Addr().WithZone("")
+		bits := p.Bits()
+		if a.Is4In6() {
+			a, bits = a.Unmap(), max(bits-96, 0)
+		}
+		minBits := minHostPrefix6
+		if a.Is4() {
+			minBits = minHostPrefix4
+		}
+		if bits >= minBits && bits < a.BitLen() {
+			out = append(out, netip.PrefixFrom(a, bits).Masked())
+		}
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out
 }
 
 // privateSet is always rejected in restricted mode, on top of the on-link
@@ -75,7 +113,7 @@ func mustPrefixes(ss ...string) []netip.Prefix {
 
 // RestrictedRules builds the restricted-mode rules, in order:
 // lo, NDP, DNS to pasta's resolver, allow_cidrs, then reject the private
-// set and the on-link prefixes. The chain policy accepts everything else.
+// set, the on-link prefixes and the host's own addresses and prefixes. The chain policy accepts everything else.
 func RestrictedRules(in NetInputs) ([]Rule, error) {
 	var dns []netip.Addr
 	for _, r := range in.Resolvers {
@@ -103,10 +141,12 @@ func RestrictedRules(in NetInputs) ([]Rule, error) {
 	for _, p := range privateSet {
 		rules = append(rules, Rule{Dst: p, Verdict: Reject})
 	}
-	for _, p := range dedupe(in.OnLink) {
-		if covered(p, privateSet) {
+	var rejected []netip.Prefix
+	for _, p := range dedupe(append(slices.Clone(in.OnLink), hostRejects(in.HostAddrs)...)) {
+		if covered(p, privateSet) || covered(p, rejected) {
 			continue
 		}
+		rejected = append(rejected, p)
 		rules = append(rules, Rule{Dst: p, Verdict: Reject})
 	}
 	return rules, nil

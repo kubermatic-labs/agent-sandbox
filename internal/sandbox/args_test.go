@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"flag"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,7 +60,7 @@ func TestRunArgsGoldenRO(t *testing.T) {
 		Mounts:    plan.Mounts,
 		EnvFile:   "/home/u/.config/agent-sandbox/secrets.env",
 		Image:     "localhost/agent-sandbox-base:0123456789abcdef",
-		Command:   InitCommand(cfg, 1000),
+		Command:   InitCommand(cfg, 1000, nil),
 	}))
 }
 
@@ -113,7 +114,7 @@ func TestInitCommand(t *testing.T) {
 	cfg.AllowCIDRs = []string{"10.0.0.1", "192.168.1.0/24"}
 	want := []string{"/usr/local/bin/agent-sandbox", "_init", "--network=restricted", "--idle=10m0s", "--uid=1000",
 		"--allow-cidr=10.0.0.1", "--allow-cidr=192.168.1.0/24"}
-	if diff := cmp.Diff(want, InitCommand(cfg, 1000)); diff != "" {
+	if diff := cmp.Diff(want, InitCommand(cfg, 1000, nil)); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
@@ -138,7 +139,7 @@ func TestRunArgsGoldenWorktree(t *testing.T) {
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
 		Image:     "localhost/agent-sandbox-base:0123456789abcdef",
-		Command:   InitCommand(cfg, 1000),
+		Command:   InitCommand(cfg, 1000, nil),
 	}))
 }
 
@@ -162,13 +163,13 @@ func TestInitCommandAllowlist(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Network = "allowlist"
 	cfg.AllowDomains = []string{"*.example.com"}
-	got := InitCommand(cfg, 1000)
+	got := InitCommand(cfg, 1000, nil)
 	if !slices.Contains(got, "--network=allowlist") || !slices.Contains(got, "--allow-domain=api.anthropic.com") ||
 		got[len(got)-1] != "--allow-domain=*.example.com" {
 		t.Errorf("InitCommand = %q", got)
 	}
 	cfg.Network = "restricted"
-	for _, a := range InitCommand(cfg, 1000) {
+	for _, a := range InitCommand(cfg, 1000, nil) {
 		if strings.HasPrefix(a, "--allow-domain") {
 			t.Errorf("restricted mode got %q", a)
 		}
@@ -195,7 +196,7 @@ func TestConfigHash(t *testing.T) {
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
 		Image:     "img:1",
-		Command:   InitCommand(cfg, 1000),
+		Command:   InitCommand(cfg, 1000, nil),
 	}
 	h := ConfigHash(base)
 	if got := RunArgs(base); !slices.Contains(got, ConfigLabel+"="+h) {
@@ -216,8 +217,8 @@ func TestConfigHash(t *testing.T) {
 	open.Network = "open"
 	allowCIDR.AllowCIDRs = []string{"10.0.0.0/8"}
 	differ := map[string]func(*RunInput){
-		"network":    func(in *RunInput) { in.Command = InitCommand(open, 1000) },
-		"allow_cidr": func(in *RunInput) { in.Command = InitCommand(allowCIDR, 1000) },
+		"network":    func(in *RunInput) { in.Command = InitCommand(open, 1000, nil) },
+		"allow_cidr": func(in *RunInput) { in.Command = InitCommand(allowCIDR, 1000, nil) },
 		"mount": func(in *RunInput) {
 			in.Mounts = append(slices.Clone(in.Mounts), mounts.Mount{Src: "/home/u/.aws", Dst: "/x", RO: true})
 		},
@@ -231,5 +232,30 @@ func TestConfigHash(t *testing.T) {
 		if ConfigHash(in) == h {
 			t.Errorf("%s did not change the config hash", name)
 		}
+	}
+}
+
+func TestInitCommandHostAddrs(t *testing.T) {
+	host := []netip.Prefix{netip.MustParsePrefix("198.51.100.7/24"), netip.MustParsePrefix("2001:db8::5/64")}
+	cfg := config.Defaults()
+	got := InitCommand(cfg, 1000, host)
+	for _, want := range []string{"--host-addr=198.51.100.7/24", "--host-addr=2001:db8::5/64"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("%s missing: %q", want, got)
+		}
+	}
+	cfg.Network = "open"
+	for _, a := range InitCommand(cfg, 1000, host) {
+		if strings.HasPrefix(a, "--host-addr=") {
+			t.Errorf("open mode has no rules, but got %s", a)
+		}
+	}
+	// Host addresses change all the time; they must not make a running
+	// sandbox look misconfigured.
+	in := RunInput{Container: "c", Image: "img", Command: InitCommand(config.Defaults(), 1000, host)}
+	other := in
+	other.Command = InitCommand(config.Defaults(), 1000, host[:1])
+	if ConfigHash(in) != ConfigHash(other) {
+		t.Error("host addresses changed the config hash")
 	}
 }

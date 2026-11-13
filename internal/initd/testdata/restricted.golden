@@ -28,5 +28,9 @@ table inet asb {
 		ip6 daddr 64:ff9b:1::/48 reject with icmpx admin-prohibited
 		ip daddr 203.0.113.0/24 reject with icmpx admin-prohibited
 		ip6 daddr 2001:db8:1:2::/64 reject with icmpx admin-prohibited
+		ip daddr 198.51.100.0/24 reject with icmpx admin-prohibited
+		ip6 daddr 2001:db8:9::/64 reject with icmpx admin-prohibited
+		ip daddr 8.8.8.8 reject with icmpx admin-prohibited
+		ip daddr 100.1.2.0/24 reject with icmpx admin-prohibited
 	}
 }

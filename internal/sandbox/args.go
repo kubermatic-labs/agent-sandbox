@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 
 	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/mounts"
@@ -53,8 +55,13 @@ type RunInput struct {
 // ConfigLabel records ConfigHash on the container.
 const ConfigLabel = "agent-sandbox.config"
 
+// hostAddrFlag passes a host address to _init. It is left out of ConfigHash:
+// host addresses change all the time (temporary IPv6 addresses, another
+// Wi-Fi), and a running sandbox cannot learn new ones anyway (spec 4.4).
+const hostAddrFlag = "--host-addr="
+
 // ConfigHash identifies everything a running sandbox enforces: the podman
-// run argv without the labels and the image (network mode, allowed CIDRs and
+// run argv without the labels, the image and the host addresses (network mode, allowed CIDRs and
 // domains, idle timeout, mounts and deny-list overlays, resources, env
 // file). A running sandbox with another hash was started under another
 // policy and must not be reused (spec 2.4). Image and binary changes are
@@ -63,6 +70,9 @@ func ConfigHash(in RunInput) string {
 	in.Image = ""
 	h := sha256.New()
 	for _, a := range runArgs(in, nil) {
+		if strings.HasPrefix(a, hostAddrFlag) {
+			continue
+		}
 		h.Write([]byte(a))
 		h.Write([]byte{0})
 	}
@@ -107,7 +117,9 @@ func runArgs(in RunInput, labels map[string]string) []string {
 }
 
 // InitCommand is the container's PID 1: agent-sandbox _init (spec 4.2).
-func InitCommand(cfg config.Config, uid int) []string {
+// hostAddrs are the host's own interface addresses (initd.InterfaceAddrs on
+// the host), blocked in restricted and allowlist mode.
+func InitCommand(cfg config.Config, uid int, hostAddrs []netip.Prefix) []string {
 	cmd := []string{
 		mounts.BinaryPath, "_init",
 		"--network=" + cfg.Network,
@@ -116,6 +128,11 @@ func InitCommand(cfg config.Config, uid int) []string {
 	}
 	for _, c := range cfg.AllowCIDRs {
 		cmd = append(cmd, "--allow-cidr="+c)
+	}
+	if cfg.Network != "open" {
+		for _, a := range hostAddrs {
+			cmd = append(cmd, hostAddrFlag+a.String())
+		}
 	}
 	if cfg.Network == "allowlist" {
 		for _, d := range cfg.AllowDomainsWithDefaults() {

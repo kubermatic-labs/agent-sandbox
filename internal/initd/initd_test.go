@@ -81,6 +81,7 @@ func TestValidate(t *testing.T) {
 	for _, ok := range []Options{
 		{Network: "open", Idle: time.Minute, UID: 1000},
 		{Network: "restricted", Idle: time.Minute, UID: 1000, AllowCIDRs: []string{"10.0.0.1", "fd00::/8"}},
+		{Network: "restricted", Idle: time.Minute, UID: 1000, HostAddrs: []string{"198.51.100.7/24", "2001:db8::5/64"}},
 		{Network: "allowlist", Idle: time.Minute, UID: 1000, AllowDomains: []string{"api.anthropic.com"}},
 	} {
 		if err := ok.Validate(); err != nil {
@@ -89,6 +90,7 @@ func TestValidate(t *testing.T) {
 	}
 	for name, o := range map[string]Options{
 		"bad allow cidr":  {Network: "restricted", Idle: time.Minute, UID: 1000, AllowCIDRs: []string{"10.0.0.0/33"}},
+		"bad host addr":   {Network: "restricted", Idle: time.Minute, UID: 1000, HostAddrs: []string{"198.51.100.7"}},
 		"proxy uid":       {Network: "allowlist", Idle: time.Minute, UID: ProxyID},
 		"unknown network": {Network: "wide", Idle: time.Minute, UID: 1000},
 		"no idle":         {Network: "open", UID: 1000},

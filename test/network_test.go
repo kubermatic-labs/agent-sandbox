@@ -159,3 +159,40 @@ func TestRestrictedRulesAreLogged(t *testing.T) {
 		}
 	}
 }
+
+// Pasta connects from the host, so the host's own addresses on interfaces
+// pasta did not copy (a second NIC, an alias, a VPN) would reach host
+// services. Every one of them must be blocked, not only the private ones.
+func TestRestrictedBlocksEveryHostAddress(t *testing.T) {
+	e := newProject(t, "")
+	port := hostListener(t)
+	ifs, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, ifc := range ifs {
+		if ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip, ok := netip.AddrFromSlice(ipn.IP)
+			if !ok || ip.Unmap().IsLinkLocalUnicast() { // needs a zone; rejected by fe80::/10 anyway
+				continue
+			}
+			e.mustBeBlocked(ip.Unmap().String(), port)
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Skip("the host has no non-loopback addresses")
+	}
+}

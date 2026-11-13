@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,6 +41,7 @@ type Options struct {
 	UID          int      // host uid the sessions run as
 	AllowCIDRs   []string // extra reachable CIDRs (restricted, allowlist)
 	AllowDomains []string // allowlist mode: hosts the proxy allows
+	HostAddrs    []string // the host's own interface addresses, addr/bits
 
 	ReadyFile  string        // default ReadyFile
 	ProcDir    string        // default /proc
@@ -79,6 +81,11 @@ func (o Options) Validate() error {
 	for _, c := range o.AllowCIDRs {
 		if _, err := config.ParseCIDR(c); err != nil {
 			return fmt.Errorf("--allow-cidr %q: %w", c, err)
+		}
+	}
+	for _, a := range o.HostAddrs {
+		if _, err := netip.ParsePrefix(a); err != nil {
+			return fmt.Errorf("--host-addr %q: %w", a, err)
 		}
 	}
 	return nil
@@ -276,6 +283,13 @@ func netInputs(o Options) (NetInputs, error) {
 			return NetInputs{}, err
 		}
 		in.AllowCIDRs = append(in.AllowCIDRs, p)
+	}
+	for _, a := range o.HostAddrs {
+		p, err := netip.ParsePrefix(a)
+		if err != nil {
+			return NetInputs{}, err
+		}
+		in.HostAddrs = append(in.HostAddrs, p)
 	}
 	return in, nil
 }

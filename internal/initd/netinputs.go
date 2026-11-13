@@ -29,6 +29,21 @@ func ParseResolvConf(b []byte) []netip.Addr {
 // OnLinkPrefixes returns the address prefixes of every interface except
 // loopback. Under pasta these are the host's on-link subnets.
 func OnLinkPrefixes() ([]netip.Prefix, error) {
+	addrs, err := InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netip.Prefix, len(addrs))
+	for i, a := range addrs {
+		out[i] = a.Masked()
+	}
+	return out, nil
+}
+
+// InterfaceAddrs returns the address of every interface except loopback,
+// with its prefix length and host bits kept (192.0.2.7/24). The wrapper
+// calls it on the host for --host-addr.
+func InterfaceAddrs() ([]netip.Prefix, error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -55,7 +70,7 @@ func OnLinkPrefixes() ([]netip.Prefix, error) {
 			if addr.Is4In6() {
 				addr = addr.Unmap()
 			}
-			out = append(out, netip.PrefixFrom(addr, ones).Masked())
+			out = append(out, netip.PrefixFrom(addr.WithZone(""), ones))
 		}
 	}
 	return out, nil

@@ -186,6 +186,7 @@ func newPID1Cmd(code *int) *cobra.Command {
 	cmd.Flags().IntVar(&o.UID, "uid", 0, "host uid the sessions run as")
 	cmd.Flags().StringArrayVar(&o.AllowCIDRs, "allow-cidr", nil, "extra reachable CIDR")
 	cmd.Flags().StringArrayVar(&o.AllowDomains, "allow-domain", nil, "allowlist mode: allowed host")
+	cmd.Flags().StringArrayVar(&o.HostAddrs, "host-addr", nil, "host interface address (addr/bits) to block in restricted rules")
 	return cmd
 }
 

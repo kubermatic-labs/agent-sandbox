@@ -55,6 +55,14 @@ func TestRestrictedRulesGolden(t *testing.T) {
 			"fe80::/64",
 		),
 		AllowCIDRs: mustPrefixes("10.0.0.5/32", "192.168.1.0/24", "fd00::1/128"),
+		HostAddrs: mustPrefixes(
+			"198.51.100.7/24",      // second NIC, public: its /24 (and so the address)
+			"203.0.113.9/24",       // the copied interface: already on-link
+			"2001:db8:9::5/64",     // public IPv6 on another NIC
+			"8.8.8.8/4",            // too wide to reject whole: the address only
+			"192.168.5.5/24",       // private: already rejected
+			"::ffff:100.1.2.3/120", // IPv4-mapped: 100.1.2.0/24
+		),
 	})
 	if err != nil {
 		t.Fatal(err)

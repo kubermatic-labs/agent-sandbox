@@ -126,6 +126,12 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		return 1, err
 	}
 
+	// The host's own addresses, blocked inside the sandbox (spec 4.4): pasta
+	// connects from the host, so they would reach host services.
+	hostAddrs, err := initd.InterfaceAddrs()
+	if err != nil {
+		return 1, fmt.Errorf("reading the host's interface addresses: %w", err)
+	}
 	container := project.ContainerName(proj.ID, o.Name)
 	envFile := ""
 	if hasSecrets {
@@ -139,7 +145,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		Mounts:    plan.Mounts,
 		EnvFile:   envFile,
 		Image:     im.tag,
-		Command:   sandbox.InitCommand(cfg, os.Getuid()),
+		Command:   sandbox.InitCommand(cfg, os.Getuid(), hostAddrs),
 	}
 	runArgv := sandbox.RunArgs(runIn)
 

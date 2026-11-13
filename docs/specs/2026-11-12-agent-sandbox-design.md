@@ -374,7 +374,14 @@ All modes use `--network pasta`. Restriction is enforced by nftables in the cont
   `fc00::/7`, `fe80::/10`, `ff00::/8`, `::ffff:0:0/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, **plus the on-link prefix
   of every non-`lo` interface** (from `_init` step 1; prefixes already inside the fixed ranges are skipped). The
   interface prefixes cover LAN hosts with public IPv4 or global IPv6 addresses, and the host's other global addresses
-  on the same subnet, none of which the fixed ranges catch. Rules, in order:
+  on the same subnet, none of which the fixed ranges catch. **Plus the host's own addresses:** pasta copies only one
+  host interface into the container, but it connects on the container's behalf from the host, so a public address
+  the host has on another interface (a second NIC, an alias, a VPN) would reach host services bound to it, and its
+  subnet would reach that LAN. The wrapper therefore reads the host's non-loopback interface addresses (pure Go,
+  `net.Interfaces`) and passes each as `_init --host-addr=<addr>/<bits>`. `_init` rejects the address and, unless the
+  prefix is wider than /16 (IPv4) or /32 (IPv6), its whole prefix. Host addresses are left out of the
+  `agent-sandbox.config` hash (section 2.4): they change too often, for example temporary IPv6 addresses. An address
+  the host gains after the sandbox started is not blocked until the sandbox restarts (section 11). Rules, in order:
   1. accept `oifname "lo"`;
   2. accept ICMPv6 neighbor discovery (router solicit, neighbor solicit, neighbor advert). Rejecting `ff00::/8` and
      `fe80::/10` would otherwise break IPv6 entirely; these messages cannot carry data to the LAN, and pasta answers
@@ -383,9 +390,10 @@ All modes use `--network pasta`. Restriction is enforced by nftables in the cont
      in `/etc/resolv.conf`. Other nameservers podman lists there (for example the LAN router) are not accepted. If
      there is no link-local nameserver, `_init` fails;
   4. accept `allow_cidrs`;
-  5. reject the private set with ICMP admin-prohibited (`reject with icmpx admin-prohibited`). Reject, not drop: a
-     drop in the output hook leaves `connect()` hanging until the TCP timeout (verified), so every blocked
-     connection would stall the agent; reject fails it at once with "No route to host";
+  5. reject the private set, the on-link prefixes and the host addresses with ICMP admin-prohibited
+     (`reject with icmpx admin-prohibited`). Reject, not drop: a drop in the output hook leaves `connect()` hanging
+     until the TCP timeout (verified), so every blocked connection would stall the agent; reject fails it at once
+     with "No route to host";
   6. accept everything else (chain policy).
 
   `host.containers.internal`, the pasta gateway and the LAN are therefore unreachable unless listed in `allow_cidrs`.
@@ -663,6 +671,8 @@ The README states these plainly:
 - `allowlist` reduces exfiltration but does not stop it: the agent can send data through an allowed API, for example
   with an attacker's API key.
 - `open` mode can reach the host through `host.containers.internal`, and the LAN.
+- `restricted` and `allowlist` block the host's addresses as of sandbox start. An address the host gains later (a VPN
+  coming up, another network) is reachable from a running sandbox until it is restarted.
 - Deny-list paths that did not exist at container start are not protected; the post-session scan only detects them.
 - An approved project Containerfile runs its `RUN` steps on the host with podman's default (unrestricted) build
   network. The trust prompt says so; review it like any script you run.
