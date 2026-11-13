@@ -120,6 +120,9 @@ func checkDst(dst string, env Env) error {
 	if env.ProjectRoot != "" && fspath.Within(dst, env.ProjectRoot) {
 		return errors.New("must not shadow files of the project mount")
 	}
+	if env.DataDir != "" && fspath.Within(dst, env.DataDir) {
+		return errors.New("must not shadow the agent-sandbox data dir (worktrees are mounted from there)")
+	}
 	for _, r := range reservedDsts {
 		if fspath.Within(dst, r) {
 			return fmt.Errorf("%s is reserved by agent-sandbox", r)

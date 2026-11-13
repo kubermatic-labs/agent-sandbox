@@ -67,11 +67,56 @@ func TestBuildWithoutGit(t *testing.T) {
 	}
 }
 
-func TestBuildRefusesWorktree(t *testing.T) {
+func TestBuildWorktree(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Git = "worktree"
-	if _, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Binary: "/b", Config: cfg}); err == nil {
-		t.Error("worktree mode must be refused until implemented")
+	wt := "/home/u/.local/share/agent-sandbox/worktrees/proj-1/default"
+	p, err := Build(Input{
+		Root: wt, Deny: []string{".git"}, ID: "proj-1", Home: "/home/u", Binary: "/b", Config: cfg,
+		Worktree: &GitMount{GitDir: "/home/u/src/proj/.git", AdminDir: "/home/u/src/proj/.git/worktrees/default", ConfigWorktree: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range p.Mounts {
+		if !m.Volume && m.Dst != BinaryPath {
+			got = append(got, m.Arg())
+		}
+	}
+	want := []string{
+		wt + ":" + wt + ":z",
+		wt + "/.git:" + wt + "/.git:ro",
+		"/home/u/src/proj/.git:/home/u/src/proj/.git:ro,z",
+		"/home/u/src/proj/.git/objects:/home/u/src/proj/.git/objects",
+		"/home/u/src/proj/.git/objects/pack:/home/u/src/proj/.git/objects/pack:ro",
+		"/home/u/src/proj/.git/objects/info:/home/u/src/proj/.git/objects/info:ro",
+		"/home/u/src/proj/.git/refs/heads/asb:/home/u/src/proj/.git/refs/heads/asb",
+		"/home/u/src/proj/.git/logs/refs/heads/asb:/home/u/src/proj/.git/logs/refs/heads/asb",
+		"/home/u/src/proj/.git/worktrees/default:/home/u/src/proj/.git/worktrees/default",
+		"/home/u/src/proj/.git/worktrees/default/commondir:/home/u/src/proj/.git/worktrees/default/commondir:ro",
+		"/home/u/src/proj/.git/worktrees/default/gitdir:/home/u/src/proj/.git/worktrees/default/gitdir:ro",
+		"/home/u/src/proj/.git/worktrees/default/config.worktree:/home/u/src/proj/.git/worktrees/default/config.worktree:ro",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+}
+
+func TestBuildModeChecks(t *testing.T) {
+	ro, wt := config.Defaults(), config.Defaults()
+	wt.Git = "worktree"
+	g := &GitMount{GitDir: "/p/.git", AdminDir: "/p/.git/worktrees/x"}
+	for name, in := range map[string]Input{
+		"worktree without git mount": {Root: "/w", Binary: "/b", Config: wt},
+		"ro with git mount":          {Root: "/p", Binary: "/b", Config: ro, Worktree: g},
+		"admin outside worktrees":    {Root: "/w", Binary: "/b", Config: wt, Worktree: &GitMount{GitDir: "/p/.git", AdminDir: "/p/.git"}},
+		"admin nested":               {Root: "/w", Binary: "/b", Config: wt, Worktree: &GitMount{GitDir: "/p/.git", AdminDir: "/p/.git/worktrees/x/y"}},
+		"admin elsewhere":            {Root: "/w", Binary: "/b", Config: wt, Worktree: &GitMount{GitDir: "/p/.git", AdminDir: "/q/.git/worktrees/x"}},
+	} {
+		if _, err := Build(in); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
 

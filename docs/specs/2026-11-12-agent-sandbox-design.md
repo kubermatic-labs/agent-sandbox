@@ -66,7 +66,7 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
 ### 2.3 Commands
 
 ```
-agent-sandbox [-n NAME] [--strict] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
+agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
 agent-sandbox init                                    # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
@@ -132,6 +132,9 @@ env           = {}                  # extra env for sessions (reserved keys refu
 mounts        = []                  # [{ src = "~/.kube/kind.yaml", dst = "~/.kube/config", ro = true }]
 caches        = ["go"]              # presets, see 3.5; volumes are per project
 resources     = { memory = "8g", cpus = 4, pids = 4096 }
+strict        = false               # see section 7
+git_user_name  = ""                 # worktree mode commit identity; default "agent-sandbox (<name>)"
+git_user_email = ""                 # default "agent-sandbox@localhost"
 ```
 
 The built-in global defaults for `allow_domains` cover only the agent API and auth endpoints (`api.anthropic.com`,
@@ -156,7 +159,7 @@ Validation:
     (`~/.bashrc`, `~/.profile`, `~/.local/bin`, ...), or overlaps a directory on the host `$PATH` (`~/bin`);
   - it contains `:` or `,`.
 - `mounts[].dst` must be absolute after `~` expansion. It must not be `/` or `$HOME` (the home volume), must not lie
-  inside the project root, and must not lie inside `/usr/local/bin/agent-sandbox`, `/cache`, `/run/asb`, `/proc`,
+  inside the project root or the agent-sandbox data dir (worktrees are mounted from there), and must not lie inside `/usr/local/bin/agent-sandbox`, `/cache`, `/run/asb`, `/proc`,
   `/sys` or `/dev`.
 - `env` must not set reserved keys: `HOME`, `PATH`, `USER`, `GIT_CONFIG_*`, `HTTP_PROXY`, `HTTPS_PROXY`,
   `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy`, or any env var a cache preset sets.
@@ -447,6 +450,10 @@ that exists but was not overlaid, so creation is at least detected. Document the
 3. If the main config has `extensions.worktreeConfig=true`, create an empty `.git/worktrees/<name>/config.worktree`
    so it can be overlaid read-only.
 
+Worktree mode needs the main checkout: `<root>/.git` must be a directory. Creation runs under a per-sandbox lock so
+parallel invocations do not race on `git worktree add`. The admin dir is taken from the worktree's `.git` file and
+must lie directly under `<root>/.git/worktrees/`.
+
 If the worktree directory exists but git does not know it, or the reverse: error, suggest `git worktree prune`, and
 never delete anything.
 
@@ -471,8 +478,11 @@ Before mounting, create on the host any of `refs/heads/asb/`, `logs/refs/heads/a
 matters: the ro base first, then the more specific mounts.
 
 Session env sets, through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`: `gc.auto=0`,
-`maintenance.auto=0`, `user.name=agent-sandbox (<name>)` and `user.email=agent-sandbox@localhost` (both overridable
-in global config).
+`maintenance.auto=0`, `user.name=agent-sandbox (<name>)` and `user.email=agent-sandbox@localhost` (overridable with
+`git_user_name` / `git_user_email`). These are conveniences, not security: the agent can unset them.
+
+The mount plans of `ro` and `worktree` mode differ, so a running sandbox whose `git-mode` label differs from the
+config is not used: the run fails and asks to stop the sandbox first.
 
 **Works:** commit, amend, rebase, reset, branching under `asb/`, and log/diff/blame over all history.
 

@@ -9,6 +9,7 @@ import (
 	"golang.org/x/term"
 
 	"k8c.io/agent-sandbox/internal/config"
+	"k8c.io/agent-sandbox/internal/flock"
 	"k8c.io/agent-sandbox/internal/fspath"
 	"k8c.io/agent-sandbox/internal/hostgit"
 	"k8c.io/agent-sandbox/internal/image"
@@ -19,6 +20,7 @@ import (
 	"k8c.io/agent-sandbox/internal/scan"
 	"k8c.io/agent-sandbox/internal/selfbin"
 	"k8c.io/agent-sandbox/internal/trust"
+	"k8c.io/agent-sandbox/internal/worktree"
 )
 
 // RunOptions are the main command's arguments.
@@ -26,6 +28,7 @@ type RunOptions struct {
 	Name   string
 	Cmd    []string // after --; empty means config command or bash -l
 	Strict bool     // refuse to start while earlier scan findings exist
+	GC     bool     // worktree mode: git gc on the host before starting
 }
 
 // Run is the main entry: trust, ensure images, ensure running, exec. It
@@ -72,16 +75,33 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 			return 1, fmt.Errorf("refusing to start (strict): %d earlier finding(s) not resolved", len(open))
 		}
 	}
-	deny, err := e.denyList(cfg)
-	if err != nil {
-		return 1, err
-	}
-	denyPresent, err := mounts.ResolveDeny(proj.Root, deny)
-	if err != nil {
+	if err := e.prepare(ctx); err != nil {
 		return 1, err
 	}
 
-	if err := e.prepare(ctx); err != nil {
+	// The mounted tree: the project root, or the sandbox's worktree.
+	tree := proj.Root
+	gitDir, _, _, err := hostgit.GitDirs(proj.Root)
+	if err != nil {
+		return 1, err
+	}
+	var gitMount *mounts.GitMount
+	var gitEnv []string
+	if cfg.Git == "worktree" {
+		wt, err := e.ensureWorktree(ctx, o, cfg)
+		if err != nil {
+			return 1, err
+		}
+		tree, gitDir = wt.Path, wt.GitDir
+		gitMount = &mounts.GitMount{GitDir: wt.GitDir, AdminDir: wt.AdminDir, ConfigWorktree: wt.ConfigWorktree}
+		gitEnv = sandbox.GitSessionEnv(o.Name, cfg.GitUserName, cfg.GitUserEmail)
+	}
+	deny, err := e.denyList(cfg, tree)
+	if err != nil {
+		return 1, err
+	}
+	denyPresent, err := mounts.ResolveDeny(tree, deny)
+	if err != nil {
 		return 1, err
 	}
 	hasSecrets, err := config.CheckSecrets(p.SecretsFile())
@@ -100,7 +120,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("staging the agent-sandbox binary: %w", err)
 	}
-	plan, err := mounts.Build(mounts.Input{Root: proj.Root, Deny: denyPresent, ID: proj.ID, Home: p.Home, Binary: binPath, Config: cfg})
+	plan, err := mounts.Build(mounts.Input{Root: tree, Deny: denyPresent, Worktree: gitMount, ID: proj.ID, Home: p.Home, Binary: binPath, Config: cfg})
 	if err != nil {
 		return 1, err
 	}
@@ -132,9 +152,9 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		Container: container,
 		UID:       os.Getuid(),
 		GID:       os.Getgid(),
-		Workdir:   project.MapWorkdir(e.cwd, proj.Root, proj.Root),
+		Workdir:   workdir(e.cwd, proj.Root, tree),
 		TTY:       term.IsTerminal(int(os.Stdin.Fd())),
-		Env:       sandbox.SessionEnv(cfg.Env, plan.Env),
+		Env:       sandbox.SessionEnv(cfg.Env, append(plan.Env, gitEnv...)),
 		Cmd:       command,
 	})
 
@@ -155,12 +175,18 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		TmpDir:       p.RuntimeDir,
 		ImageID:      im.imageID,
 		BinaryHash:   binHash,
+		GitMode:      cfg.Git,
 	}
 	code, err := sb.Exec(ctx, execArgv)
 	if err != nil {
 		return code, err
 	}
-	e.postScan(ctx, container, deny, plan, statePath)
+	e.postScan(ctx, container, scan.Input{
+		Root:       tree,
+		RootHadGit: proj.HasGit,
+		GitDir:     gitDir,
+		Deny:       deny,
+	}, plan, statePath)
 	return code, nil
 }
 
@@ -168,14 +194,14 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 // project and config readonly. A hooksPath directory that does not exist yet
 // is created empty, so it can be overlaid: git on the host runs whatever the
 // agent would put there.
-func (e *env) denyList(cfg config.Config) ([]string, error) {
-	gitCfg, err := hostgit.RepoConfig(e.proj.Root, hostgit.Env{Home: e.paths.Home, ConfigHome: e.paths.ConfigHome})
+func (e *env) denyList(cfg config.Config, tree string) ([]string, error) {
+	gitCfg, err := hostgit.RepoConfig(tree, hostgit.Env{Home: e.paths.Home, ConfigHome: e.paths.ConfigHome})
 	if err != nil {
 		return nil, fmt.Errorf("reading git config: %w", err)
 	}
-	hooks := hostgit.HooksPathsInside(gitCfg, e.proj.Root, e.paths.Home)
+	hooks := hostgit.HooksPathsInside(gitCfg, tree, e.paths.Home)
 	for _, rel := range hooks {
-		dir := filepath.Join(e.proj.Root, rel)
+		dir := filepath.Join(tree, rel)
 		if fspath.Real(dir) != dir {
 			return nil, fmt.Errorf("core.hooksPath %s is a symlink or lies under one; agent-sandbox cannot protect it read-only", dir)
 		}
@@ -188,7 +214,7 @@ func (e *env) denyList(cfg config.Config) ([]string, error) {
 
 // postScan runs the post-session scan (spec 7) and records and prints its
 // findings. Failures are warnings: the session has already run.
-func (e *env) postScan(ctx context.Context, container string, deny []string, plan mounts.Plan, statePath string) {
+func (e *env) postScan(ctx context.Context, container string, in scan.Input, plan mounts.Plan, statePath string) {
 	overlaid := map[string]bool{}
 	dsts, err := e.pm.MountDestinations(ctx, container)
 	if err != nil { // the sandbox is gone; fall back to this run's plan
@@ -199,14 +225,8 @@ func (e *env) postScan(ctx context.Context, container string, deny []string, pla
 	for _, d := range dsts {
 		overlaid[d] = true
 	}
-	gitDir, _, _, _ := hostgit.GitDirs(e.proj.Root)
-	current := scan.Scan(scan.Input{
-		Root:       e.proj.Root,
-		RootHadGit: e.proj.HasGit,
-		GitDir:     gitDir,
-		Deny:       deny,
-		Overlaid:   overlaid,
-	})
+	in.Overlaid = overlaid
+	current := scan.Scan(in)
 	recorded, err := scan.Load(statePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent-sandbox: reading %s: %v\n", statePath, err)
@@ -218,4 +238,48 @@ func (e *env) postScan(ctx context.Context, container string, deny []string, pla
 	if len(all) > 0 {
 		fmt.Fprint(os.Stderr, scan.Warning(all, statePath))
 	}
+}
+
+// ensureWorktree creates or resumes the sandbox's worktree (spec 5.3) under
+// a lock, so parallel invocations do not race on git worktree add.
+func (e *env) ensureWorktree(ctx context.Context, o RunOptions, cfg config.Config) (worktree.Worktree, error) {
+	unlock, err := flock.Lock(filepath.Join(e.paths.RuntimeDir, "worktree-"+e.proj.ID+"-"+o.Name+".lock"))
+	if err != nil {
+		return worktree.Worktree{}, err
+	}
+	defer unlock()
+	git := hostgit.Runner{}
+	if o.GC {
+		// Packing the loose objects closes the window in which the agent
+		// could overwrite them (spec 5.3, residual risk).
+		if _, err := git.Run(ctx, e.proj.Root, "gc", "--quiet"); err != nil {
+			return worktree.Worktree{}, fmt.Errorf("git gc: %w", err)
+		}
+	}
+	wt, err := worktree.Ensure(ctx, git, worktree.Input{
+		Root:      e.proj.Root,
+		ProjectID: e.proj.ID,
+		Name:      o.Name,
+		DataDir:   e.paths.DataDir,
+		Home:      e.paths.Home,
+		Copy:      cfg.WorktreeCopy,
+		Log:       os.Stderr,
+	})
+	if err != nil {
+		return worktree.Worktree{}, err
+	}
+	if wt.Created {
+		fmt.Fprintf(os.Stderr, "agent-sandbox: created worktree %s on branch %s\n", wt.Path, wt.Branch)
+	}
+	return wt, nil
+}
+
+// workdir maps cwd into the mounted tree, falling back to the tree's root
+// when the directory does not exist there (a worktree of an older commit).
+func workdir(cwd, root, tree string) string {
+	w := project.MapWorkdir(cwd, root, tree)
+	if fi, err := os.Stat(w); err != nil || !fi.IsDir() {
+		return tree
+	}
+	return w
 }

@@ -41,6 +41,8 @@ type Sandbox struct {
 	// container with other values is stale (spec 2.4 step 6).
 	ImageID    string
 	BinaryHash string
+	// GitMode must match the running container's: its mounts differ.
+	GitMode string
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -84,6 +86,9 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 	}
 	for _, c := range cs {
 		if c.State == "running" {
+			if mode := c.Labels["agent-sandbox.git-mode"]; s.GitMode != "" && mode != s.GitMode {
+				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first", mode, s.GitMode, s.Container)
+			}
 			s.warnIfStale(c)
 			return nil
 		}

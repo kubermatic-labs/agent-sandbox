@@ -50,7 +50,7 @@ func run(args []string, stderr io.Writer, cmds commands) int {
 
 func newRootCmd(code *int, cmds commands) *cobra.Command {
 	var name string
-	var strict bool
+	var strict, gc bool
 	root := &cobra.Command{
 		Use:           "agent-sandbox [-n NAME] [--strict] [-- CMD ARGS...]",
 		Short:         "Run AI coding agents in a per-project rootless podman sandbox",
@@ -68,13 +68,14 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 			if len(args) == 0 {
 				args = nil
 			}
-			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict})
+			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict, GC: gc})
 			*code = c
 			return err
 		},
 	}
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
 	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
+	root.Flags().BoolVar(&gc, "gc", false, "worktree mode: run git gc on the host first, so the agent cannot touch unpacked objects")
 	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code))
 	return root
 }

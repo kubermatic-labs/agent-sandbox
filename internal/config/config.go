@@ -48,6 +48,8 @@ type Config struct {
 	Caches       []string
 	Resources    Resources
 	Strict       bool
+	GitUserName  string // worktree mode commit identity; "" means agent-sandbox (<name>)
+	GitUserEmail string // "" means agent-sandbox@localhost
 }
 
 // Defaults returns the configuration used when no file sets a key.
@@ -106,6 +108,8 @@ type file struct {
 	Caches       []string          `toml:"caches"`
 	Resources    *fileResources    `toml:"resources"`
 	Strict       *bool             `toml:"strict"`
+	GitUserName  *string           `toml:"git_user_name"`
+	GitUserEmail *string           `toml:"git_user_email"`
 }
 
 type fileResources struct {
@@ -178,6 +182,12 @@ func (c *Config) apply(f *file) {
 	}
 	if f.Strict != nil {
 		c.Strict = *f.Strict
+	}
+	if f.GitUserName != nil {
+		c.GitUserName = *f.GitUserName
+	}
+	if f.GitUserEmail != nil {
+		c.GitUserEmail = *f.GitUserEmail
 	}
 	c.AllowCIDRs = appendUnique(c.AllowCIDRs, f.AllowCIDRs...)
 	c.AllowDomains = appendUnique(c.AllowDomains, f.AllowDomains...)

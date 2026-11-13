@@ -93,6 +93,11 @@ func (f *file) validate(path string, env Env) error {
 		errs = append(errs, fmt.Errorf("%s: %s: %s", path, key, fmt.Sprintf(format, a...)))
 	}
 
+	for key, v := range map[string]*string{"git_user_name": f.GitUserName, "git_user_email": f.GitUserEmail} {
+		if v != nil && (strings.TrimSpace(*v) == "" || strings.ContainsAny(*v, "\n\x00")) {
+			bad(key, "must be a non-empty single line")
+		}
+	}
 	if f.Command != nil && len(f.Command) == 0 {
 		bad("command", "must not be empty")
 	}

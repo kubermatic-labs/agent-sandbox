@@ -324,3 +324,15 @@ func TestStaleWarning(t *testing.T) {
 		}
 	}
 }
+
+func TestGitModeMismatchRefused(t *testing.T) {
+	w := &world{state: "running", labels: `{"agent-sandbox.git-mode":"ro"}`}
+	s, f, _ := newSandbox(t, w)
+	s.GitMode = "worktree"
+	if _, err := s.Exec(context.Background(), execArgv); err == nil || !strings.Contains(err.Error(), "git mode") {
+		t.Errorf("err = %v", err)
+	}
+	if len(sessionExecs(f)) != 0 {
+		t.Error("exec'd into a sandbox with the wrong git mode")
+	}
+}

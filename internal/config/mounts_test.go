@@ -97,6 +97,7 @@ func TestResolveMountRefuses(t *testing.T) {
 		{"empty", Mount{Dst: "/x"}, "required"},
 		{"dst in project", Mount{Src: "~/data", Dst: "~/src/proj/.git", RO: true}, "shadow"},
 		{"dst home", Mount{Src: "~/data", Dst: "~", RO: true}, "home volume"},
+		{"dst in data dir", Mount{Src: "~/data", Dst: "~/.local/share/agent-sandbox/worktrees/x", RO: true}, "data dir"},
 		{"dst root", Mount{Src: "~/data", Dst: "/", RO: true}, "home volume"},
 		{"dst relative", Mount{Src: "~/data", Dst: "x", RO: true}, "absolute"},
 		{"dst cache", Mount{Src: "~/data", Dst: "/cache/go", RO: true}, "reserved"},

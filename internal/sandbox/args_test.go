@@ -117,3 +117,43 @@ func TestInitCommand(t *testing.T) {
 		t.Errorf("(-want +got):\n%s", diff)
 	}
 }
+
+func TestRunArgsGoldenWorktree(t *testing.T) {
+	p := project.Project{Root: "/home/u/src/proj", HasGit: true, ID: "proj-1a2b3c4d"}
+	cfg := config.Defaults()
+	cfg.Git = "worktree"
+	wt := "/home/u/.local/share/agent-sandbox/worktrees/proj-1a2b3c4d/default"
+	plan, err := mounts.Build(mounts.Input{
+		Root: wt, Deny: []string{".git", ".envrc"}, ID: p.ID, Home: "/home/u",
+		Binary: "/home/u/.local/share/agent-sandbox/bin/0123456789abcdef/agent-sandbox", Config: cfg,
+		Worktree: &mounts.GitMount{GitDir: "/home/u/src/proj/.git", AdminDir: "/home/u/src/proj/.git/worktrees/default"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "run-worktree", RunArgs(RunInput{
+		Container: project.ContainerName(p.ID, "default"),
+		Labels:    Labels(p, "default", "worktree", "feedface", "beef"),
+		Hostname:  "asb-proj",
+		Resources: cfg.Resources,
+		Mounts:    plan.Mounts,
+		Image:     "localhost/agent-sandbox-base:0123456789abcdef",
+		Command:   InitCommand(cfg, 1000),
+	}))
+}
+
+func TestGitSessionEnv(t *testing.T) {
+	want := []string{
+		"GIT_CONFIG_COUNT=4",
+		"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
+		"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=0",
+		"GIT_CONFIG_KEY_2=user.name", "GIT_CONFIG_VALUE_2=agent-sandbox (dev)",
+		"GIT_CONFIG_KEY_3=user.email", "GIT_CONFIG_VALUE_3=agent-sandbox@localhost",
+	}
+	if diff := cmp.Diff(want, GitSessionEnv("dev", "", "")); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+	if got := GitSessionEnv("dev", "Me", "me@x"); got[6] != "GIT_CONFIG_VALUE_2=Me" || got[8] != "GIT_CONFIG_VALUE_3=me@x" {
+		t.Errorf("overrides: %q", got)
+	}
+}

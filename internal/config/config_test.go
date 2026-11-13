@@ -53,6 +53,7 @@ caches = ["go"]
 env = { A = "global", B = "global" }
 resources = { memory = "4g", cpus = 2 }
 strict = true
+git_user_name = "Agent"
 `
 	project := `
 command = ["opencode", "--x"]
@@ -78,6 +79,7 @@ strict = false
 		Caches:      []string{"go", "npm"},
 		Resources:   Resources{Memory: "4g", CPUs: 1.5, PIDs: 4096},
 		Strict:      false,
+		GitUserName: "Agent",
 	}
 	if diff := cmp.Diff(want, c); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
@@ -109,6 +111,8 @@ func TestLoadErrors(t *testing.T) {
 		{"bad memory", `resources = { memory = "lots" }`, []string{"resources.memory"}},
 		{"bad cpus type", `resources = { cpus = "4" }`, []string{"cpus"}},
 		{"bad pids", `resources = { pids = 0 }`, []string{"resources.pids"}},
+		{"empty git user", `git_user_name = " "`, []string{"git_user_name"}},
+		{"multiline git email", "git_user_email = \"a\\nb\"", []string{"git_user_email"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

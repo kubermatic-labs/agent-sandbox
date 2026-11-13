@@ -116,6 +116,25 @@ func SessionEnv(cfgEnv map[string]string, wrapperEnv []string) []string {
 	return append(env, wrapperEnv...)
 }
 
+// GitSessionEnv configures git for worktree-mode sessions through
+// GIT_CONFIG_COUNT (spec 5.3): no automatic gc or maintenance (they would
+// try to repack into the read-only objects/pack), and a commit identity.
+// These are conveniences, not security: the agent can unset them.
+func GitSessionEnv(name, userName, userEmail string) []string {
+	if userName == "" {
+		userName = "agent-sandbox (" + name + ")"
+	}
+	if userEmail == "" {
+		userEmail = "agent-sandbox@localhost"
+	}
+	kv := [][2]string{{"gc.auto", "0"}, {"maintenance.auto", "0"}, {"user.name", userName}, {"user.email", userEmail}}
+	env := []string{"GIT_CONFIG_COUNT=" + strconv.Itoa(len(kv))}
+	for i, p := range kv {
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, p[0]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, p[1]))
+	}
+	return env
+}
+
 // ExecArgs returns the podman exec argv (spec 4.3). Stdin is always attached
 // (-i) so piped input works; a TTY (-t) only when stdin is a terminal.
 func ExecArgs(in ExecInput) []string {
