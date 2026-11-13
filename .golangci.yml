@@ -1,0 +1,15 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # Diagnostics to stdout/stderr and writes into hashes; nothing useful
+        # can be done on failure.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+run:
+  build-tags:
+    - integration

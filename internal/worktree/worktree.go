@@ -111,7 +111,9 @@ func Ensure(ctx context.Context, git hostgit.Runner, in Input) (Worktree, error)
 		if err != nil {
 			return Worktree{}, err
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			return Worktree{}, err
+		}
 		w.ConfigWorktree = true
 	} else if _, err := os.Stat(filepath.Join(admin, "config.worktree")); err == nil {
 		w.ConfigWorktree = true

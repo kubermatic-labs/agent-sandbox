@@ -120,7 +120,7 @@ func Load(path string) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []Finding
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

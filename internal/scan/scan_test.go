@@ -106,7 +106,7 @@ func TestScanUnreadableDir(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "locked"), 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "locked"), 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "locked"), 0o755) })
 	got := Scan(Input{Root: root})
 	if len(got) != 1 || !strings.Contains(got[0].Reason, "could not be scanned") {
 		t.Errorf("got %+v", got)

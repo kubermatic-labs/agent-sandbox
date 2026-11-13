@@ -170,7 +170,7 @@ func startProxy(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer devnull.Close()
+	defer func() { _ = devnull.Close() }()
 	p, err := os.StartProcess(exe, args, &os.ProcAttr{
 		Dir:   "/",
 		Env:   []string{"PATH=/usr/bin:/bin"},
@@ -187,7 +187,7 @@ func startProxy(o Options) (int, error) {
 	for {
 		c, err := net.DialTimeout("tcp", ProxyAddr, 200*time.Millisecond)
 		if err == nil {
-			c.Close()
+			_ = c.Close()
 			return p.Pid, nil
 		}
 		var ws syscall.WaitStatus

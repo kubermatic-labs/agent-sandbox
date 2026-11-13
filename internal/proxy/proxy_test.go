@@ -67,7 +67,7 @@ func client(proxyURL string, tlsCfg *tls.Config) *http.Client {
 
 func TestConnectTunnel(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "secure hello")
+		_, _ = io.WriteString(w, "secure hello")
 	}))
 	defer upstream.Close()
 	proxySrv, _ := newProxy(t, []string{"allowed.test"}, upstream.Listener.Addr().String())
@@ -78,7 +78,7 @@ func TestConnectTunnel(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if string(b) != "secure hello" {
 		t.Errorf("body = %q", b)
 	}
@@ -95,7 +95,7 @@ func TestPlainHTTP(t *testing.T) {
 			t.Error("hop-by-hop header forwarded")
 		}
 		w.Header().Set("X-Up", "1")
-		io.WriteString(w, "plain "+r.URL.Path)
+		_, _ = io.WriteString(w, "plain "+r.URL.Path)
 	}))
 	defer upstream.Close()
 	proxySrv, log := newProxy(t, []string{"allowed.test"}, upstream.Listener.Addr().String())
@@ -106,7 +106,7 @@ func TestPlainHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if string(b) != "plain /x" || resp.Header.Get("X-Up") != "1" {
 		t.Errorf("body %q, headers %v", b, resp.Header)
 	}
@@ -116,7 +116,7 @@ func TestPlainHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(b), "denied.test is not in allow_domains") {
 		t.Errorf("denied: %d %q", resp.StatusCode, b)
 	}
@@ -132,7 +132,7 @@ func TestBadRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("origin-form: %d", resp.StatusCode)
 	}
@@ -142,8 +142,8 @@ func TestBadRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	io.WriteString(conn, "CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n")
+	defer func() { _ = conn.Close() }()
+	_, _ = io.WriteString(conn, "CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\n")
 	r, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	if err != nil {
 		t.Fatal(err)

@@ -79,7 +79,7 @@ func (c *Config) parseFile(path, home string, depth int) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	section := ""
 	sc := bufio.NewScanner(f)

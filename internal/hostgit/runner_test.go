@@ -48,7 +48,9 @@ func TestRunnerIgnoresRepoHooksAndFsmonitor(t *testing.T) {
 	if _, err := f.WriteString("[core]\n\tfsmonitor = touch " + marker + "\n"); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
 		{"status"},
 		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"},

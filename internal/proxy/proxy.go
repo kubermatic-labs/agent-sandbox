@@ -112,27 +112,27 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		upstream.Close()
+		_ = upstream.Close()
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	client, buf, err := hj.Hijack()
 	if err != nil {
-		upstream.Close()
+		_ = upstream.Close()
 		return
 	}
 	if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-		client.Close()
-		upstream.Close()
+		_ = client.Close()
+		_ = upstream.Close()
 		return
 	}
 	// Bytes the client sent after the CONNECT request (a TLS ClientHello)
 	// may already sit in the buffer.
 	if n := buf.Reader.Buffered(); n > 0 {
-		b, _ := buf.Reader.Peek(n)
+		b, _ := buf.Peek(n)
 		if _, err := upstream.Write(b); err != nil {
-			client.Close()
-			upstream.Close()
+			_ = client.Close()
+			_ = upstream.Close()
 			return
 		}
 	}
@@ -155,8 +155,8 @@ func pipe(a, b net.Conn) {
 	go cp(b, a)
 	<-done
 	<-done
-	a.Close()
-	b.Close()
+	_ = a.Close()
+	_ = b.Close()
 }
 
 func (s *Server) forward(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +177,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent-sandbox: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	for _, h := range hopHeaders {
 		resp.Header.Del(h)
 	}

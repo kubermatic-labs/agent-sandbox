@@ -1,6 +1,6 @@
 module k8c.io/agent-sandbox
 
-go 1.27.4
+go 1.27.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0

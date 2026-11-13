@@ -50,7 +50,7 @@ func verifyDropped(uid, gid int) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	ids := fmt.Sprintf("%d\t%d\t%d\t%d", uid, uid, uid, uid)
 	gids := fmt.Sprintf("%d\t%d\t%d\t%d", gid, gid, gid, gid)
 	want := map[string]string{
