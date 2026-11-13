@@ -356,6 +356,9 @@ const configTemplate = `# agent-sandbox project config. Changes need approval: '
 # mounts        = []                  # [{ src = "~/.kube/kind.yaml", dst = "~/.kube/config", ro = true }]
 # caches        = ["go"]              # go | npm | pip
 # resources     = { memory = "8g", cpus = 4, pids = 4096 }
+# strict        = false               # refuse to start while scan findings are unresolved
+# git_user_name  = ""                 # worktree mode commit identity, default "agent-sandbox (<name>)"
+# git_user_email = ""                 # default "agent-sandbox@localhost"
 `
 
 const containerfileTemplate = `# Project image, built on the agent-sandbox base image (Fedora with git,

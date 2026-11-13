@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -94,6 +95,16 @@ func Load(globalPath, projectPath string, env Env) (Config, error) {
 		c.apply(f)
 	}
 	return c, nil
+}
+
+// Keys returns every top-level config key, in declaration order.
+func Keys() []string {
+	t := reflect.TypeFor[file]()
+	keys := make([]string, 0, t.NumField())
+	for f := range t.Fields() {
+		keys = append(keys, f.Tag.Get("toml"))
+	}
+	return keys
 }
 
 // file mirrors one TOML file; pointers distinguish unset keys from zero values.

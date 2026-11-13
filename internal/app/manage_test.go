@@ -1,11 +1,13 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
 
+	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/podman"
 )
@@ -36,5 +38,11 @@ func TestTemplates(t *testing.T) {
 	}
 	if err := image.CheckProjectContainerfile([]byte(containerfileTemplate)); err != nil {
 		t.Errorf("Containerfile template: %v", err)
+	}
+	// Every config key is documented in the scaffold (AGENTS.md).
+	for _, k := range config.Keys() {
+		if !strings.Contains(configTemplate, "\n# "+k+" ") {
+			t.Errorf("config template does not mention %q", k)
+		}
 	}
 }
