@@ -26,7 +26,7 @@ func TestBuildRO(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Caches = []string{"go", "npm"}
 	cfg.Mounts = []config.Mount{{Src: "/home/u/data/kind.yaml", Dst: "/home/u/.kube/config", RO: true}}
-	p, err := Build(Input{Root: "/home/u/src/proj", HasGit: true, ID: "proj-1a2b3c4d", Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123/agent-sandbox", Config: cfg})
+	p, err := Build(Input{Root: "/home/u/src/proj", Deny: []string{".git", ".envrc"}, ID: "proj-1a2b3c4d", Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123/agent-sandbox", Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +34,7 @@ func TestBuildRO(t *testing.T) {
 		Mounts: []Mount{
 			{Src: "/home/u/src/proj", Dst: "/home/u/src/proj", Relabel: true},
 			{Src: "/home/u/src/proj/.git", Dst: "/home/u/src/proj/.git", RO: true},
+			{Src: "/home/u/src/proj/.envrc", Dst: "/home/u/src/proj/.envrc", RO: true},
 			{Src: "/home/u/data/kind.yaml", Dst: "/home/u/.kube/config", RO: true, Relabel: true},
 			{Src: "/home/u/.local/share/agent-sandbox/bin/0123/agent-sandbox", Dst: "/usr/local/bin/agent-sandbox", RO: true, Relabel: true},
 			{Src: "asb-proj-1a2b3c4d-home", Dst: "/home/u", Volume: true},
@@ -77,5 +78,13 @@ func TestBuildRefusesWorktree(t *testing.T) {
 func TestBuildRequiresBinary(t *testing.T) {
 	if _, err := Build(Input{Root: "/p", ID: "p-1", Home: "/home/u", Config: config.Defaults()}); err == nil {
 		t.Error("a plan without the binary mount must be refused")
+	}
+}
+
+func TestBuildRefusesDenyOutsideRoot(t *testing.T) {
+	for _, bad := range []string{"../x", ".", "/etc"} {
+		if _, err := Build(Input{Root: "/p", Deny: []string{bad}, ID: "p-1", Home: "/home/u", Binary: "/b", Config: config.Defaults()}); err == nil {
+			t.Errorf("deny entry %q accepted", bad)
+		}
 	}
 }

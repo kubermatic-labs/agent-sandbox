@@ -417,8 +417,17 @@ mise.toml
 
 The added entries are files the host runs without the user deliberately running project code: hook frameworks run on
 the host commit (which in `ro` mode is where commits happen), and `mise`/editors evaluate them on `cd` or open.
-`core.hooksPath` is read by parsing `<root>/.git/config` in Go (including `[include]`d files inside the repo), never by
-running `git`.
+`core.hooksPath` is read by parsing git config in Go, never by running `git`: `/etc/gitconfig`, the global configs
+(`$XDG_CONFIG_HOME/git/config`, `~/.gitconfig`) and the repository's own (through a `.git` file's `gitdir:` and
+`commondir` when `.git` is a file), following `include.path` and `includeIf.*.path` unconditionally. Every
+`core.hooksPath` value from any level that resolves inside the project is added (relative values resolve against the
+project root, as git does), not just the effective one: over-approximating is the safe side. A configured hooks
+directory that does not exist yet is created empty on the host, so it can be overlaid: host git runs whatever would
+appear there.
+
+A deny-list path reached through a symlink (the path itself or a parent) is refused and the sandbox does not start.
+A bind mount follows symlinks, so overlaying `.envrc -> ~/.ssh/id_ed25519` would expose the target inside the
+sandbox, and the symlink itself could not be protected.
 
 `readonly` from the config extends the list. Paths that do not exist are skipped. This is a known gap: the agent can
 create them, and newly created files are not protected. The post-session scan (section 7) reports any deny-list path
@@ -518,14 +527,20 @@ protected.
 
 - After every session exits, walk the mounted tree (project root or worktree) on the host and report:
   - every `.git` entry other than the expected top-level one. If the project had no `.git` at container start
-    (root fell back to `$PWD`), a top-level `.git` is reported too;
+    (root fell back to `$PWD`), a top-level `.git` is reported too. Exception: a `.git` *file* whose `gitdir:` points
+    inside the protected top-level git dir (submodules, worktrees) is not reported, since what it points to is
+    read-only for the agent; otherwise every repo with submodules would warn after every session;
   - every deny-list path (built-in, `core.hooksPath`, `readonly`) that exists but is not overlaid in the running
-    container. The overlaid set comes from `podman inspect` of the container.
+    container. The overlaid set comes from `podman inspect` of the container (this run's mount plan if it is gone);
+  - every directory the walk cannot read, since it could hide a nested `.git`.
 - The walk uses `lstat` and never follows symlinks. It does not descend into the top-level `.git`, and skips
   `node_modules` and `vendor`.
-- Record the findings in `~/.local/share/agent-sandbox/state/<project-id>/findings`.
-- Print a warning listing the paths and advising the user to inspect or delete them before `cd`-ing there or
-  committing.
+- Record the findings in `~/.local/share/agent-sandbox/state/<project-id>/findings` (path and reason per line).
+  Findings are cumulative: recorded ones stay while their path exists, because a planted `.envrc` is overlaid
+  read-only in the next sandbox and would no longer be reported, yet the host would still run it. The user clears
+  them by deleting the paths or the state file.
+- Print a warning listing the paths and advising the user to inspect or delete them before `cd`-ing there,
+  committing, or opening the project in an editor.
 - With `--strict`, or `strict = true` in config, refuse to start while that state file lists paths that still exist.
 
 ## 8. Code layout

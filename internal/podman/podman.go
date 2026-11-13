@@ -210,6 +210,15 @@ func (c Client) Remove(ctx context.Context, nameOrID string) error {
 	return err
 }
 
+// MountDestinations returns the container paths of a container's mounts.
+func (c Client) MountDestinations(ctx context.Context, nameOrID string) ([]string, error) {
+	out, err := c.R.Output(ctx, "container", "inspect", "--format", "{{range .Mounts}}{{.Destination}}{{\"\\n\"}}{{end}}", nameOrID)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+}
+
 // Logs copies a container's logs to w.
 func (c Client) Logs(ctx context.Context, nameOrID string, w io.Writer) error {
 	code, err := c.R.Stream(ctx, Stdio{Out: w, Err: w}, "logs", nameOrID)

@@ -50,8 +50,9 @@ func run(args []string, stderr io.Writer, cmds commands) int {
 
 func newRootCmd(code *int, cmds commands) *cobra.Command {
 	var name string
+	var strict bool
 	root := &cobra.Command{
-		Use:           "agent-sandbox [-n NAME] [-- CMD ARGS...]",
+		Use:           "agent-sandbox [-n NAME] [--strict] [-- CMD ARGS...]",
 		Short:         "Run AI coding agents in a per-project rootless podman sandbox",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -67,12 +68,13 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 			if len(args) == 0 {
 				args = nil
 			}
-			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args})
+			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict})
 			*code = c
 			return err
 		},
 	}
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
+	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
 	root.AddCommand(newBuildCmd(cmds.build), newTrustCmd(cmds.trust), newInitCmd(code))
 	return root
 }

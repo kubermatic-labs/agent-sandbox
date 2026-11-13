@@ -42,7 +42,7 @@ func goldenPlan(t *testing.T) (project.Project, config.Config, mounts.Plan) {
 	cfg := config.Defaults()
 	cfg.Caches = []string{"go"}
 	cfg.Env = map[string]string{"FOO": "bar", "A": "b"}
-	plan, err := mounts.Build(mounts.Input{Root: p.Root, HasGit: p.HasGit, ID: p.ID, Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123456789abcdef/agent-sandbox", Config: cfg})
+	plan, err := mounts.Build(mounts.Input{Root: p.Root, Deny: []string{".git"}, ID: p.ID, Home: "/home/u", Binary: "/home/u/.local/share/agent-sandbox/bin/0123456789abcdef/agent-sandbox", Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}

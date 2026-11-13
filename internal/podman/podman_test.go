@@ -138,3 +138,19 @@ func TestClientCommands(t *testing.T) {
 		t.Errorf("calls (-want +got):\n%s", diff)
 	}
 }
+
+func TestMountDestinations(t *testing.T) {
+	f := &podmantest.Fake{Handler: func(args []string) podmantest.Result {
+		return podmantest.Result{Out: "/p\n/p/.git\n/home/u\n"}
+	}}
+	got, err := podman.Client{R: f}.MountDestinations(context.Background(), "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"/p", "/p/.git", "/home/u"}, got); diff != "" {
+		t.Errorf("(-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"container", "inspect", "--format", "{{range .Mounts}}{{.Destination}}{{\"\\n\"}}{{end}}", "c"}, f.Calls()[0]); diff != "" {
+		t.Errorf("argv (-want +got):\n%s", diff)
+	}
+}

@@ -47,11 +47,11 @@ const BinaryPath = "/usr/local/bin/agent-sandbox"
 
 // Input is everything the plan depends on.
 type Input struct {
-	Root   string // project root, real path
-	HasGit bool   // <Root>/.git exists
-	ID     string // project ID
-	Home   string // $HOME, also the home volume mount point
-	Binary string // staged agent-sandbox binary (selfbin.Stage)
+	Root   string   // project root, real path
+	Deny   []string // existing deny-list paths under Root, relative (ResolveDeny)
+	ID     string   // project ID
+	Home   string   // $HOME, also the home volume mount point
+	Binary string   // staged agent-sandbox binary (selfbin.Stage)
 	Config config.Config
 }
 
@@ -75,9 +75,14 @@ func Build(in Input) (Plan, error) {
 	}
 	var p Plan
 	p.Mounts = append(p.Mounts, Mount{Src: in.Root, Dst: in.Root, Relabel: true})
-	if in.HasGit {
-		git := filepath.Join(in.Root, ".git")
-		p.Mounts = append(p.Mounts, Mount{Src: git, Dst: git, RO: true})
+	// Read-only overlays of the deny-list (spec 5.1, 5.2). They lie under
+	// the :z project mount, so they need no relabel of their own.
+	for _, rel := range in.Deny {
+		path := filepath.Join(in.Root, rel)
+		if filepath.IsAbs(rel) || path == in.Root || !strings.HasPrefix(path, in.Root+"/") {
+			return Plan{}, fmt.Errorf("deny-list entry %q is outside the project", rel)
+		}
+		p.Mounts = append(p.Mounts, Mount{Src: path, Dst: path, RO: true})
 	}
 	for _, m := range in.Config.Mounts {
 		p.Mounts = append(p.Mounts, Mount{Src: m.Src, Dst: m.Dst, RO: m.RO, Relabel: true})

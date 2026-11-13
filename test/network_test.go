@@ -4,6 +4,7 @@ package test
 
 import (
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,11 +92,19 @@ func TestRestrictedBlocksHostAndLAN(t *testing.T) {
 	} else {
 		t.Log("no IPv4 default gateway; skipping LAN gateway checks")
 	}
-	// Every non-pasta resolver podman put into resolv.conf is blocked too.
+	// LAN resolvers podman copies into resolv.conf are blocked too. Public
+	// ones (8.8.8.8) are internet hosts, which restricted mode allows.
 	rc := e.mustRun(e.root, "", "--", "cat", "/etc/resolv.conf")
 	for _, line := range strings.Split(rc, "\n") {
 		f := strings.Fields(line)
-		if len(f) == 2 && f[0] == "nameserver" && !strings.HasPrefix(f[1], "169.254.") && !strings.Contains(f[1], ":") {
+		if len(f) != 2 || f[0] != "nameserver" {
+			continue
+		}
+		a, err := netip.ParseAddr(f[1])
+		if err != nil || !a.Is4() || a.IsLinkLocalUnicast() {
+			continue
+		}
+		if a.IsPrivate() || netip.MustParsePrefix("100.64.0.0/10").Contains(a) {
 			e.mustBeBlocked(f[1], "53")
 		}
 	}
