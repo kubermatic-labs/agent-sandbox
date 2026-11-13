@@ -77,6 +77,7 @@ func TestArgs(t *testing.T) {
 		{[]string{"--name=dev", "--", "build"}, app.RunOptions{Name: "dev", Cmd: []string{"build"}}},
 		{[]string{"--strict", "--", "ls"}, app.RunOptions{Name: "default", Cmd: []string{"ls"}, Strict: true}},
 		{[]string{"--gc", "-n", "x"}, app.RunOptions{Name: "x", GC: true}},
+		{[]string{"--replace"}, app.RunOptions{Name: "default", Replace: true}},
 	}
 	for _, tt := range tests {
 		r := &recorder{}

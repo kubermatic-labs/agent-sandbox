@@ -3,8 +3,21 @@
 FROM registry.fedoraproject.org/fedora:45
 
 RUN dnf -y install --setopt=install_weak_deps=False \
-        git ripgrep fd-find jq curl make gcc procps-ng less which ca-certificates \
-        nodejs npm \
+        ca-certificates \
+        curl \
+        fd-find \
+        gcc \
+        gh \
+        git \
+        jq \
+        less \
+        make \
+        nodejs \
+        npm \
+        procps-ng \
+        python3 \
+        ripgrep \
+        which \
     && dnf clean all
 
 # The agents are baked into the image, installed globally and owned by root:

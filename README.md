@@ -46,11 +46,12 @@ agent-sandbox -n feature -- claude       # a second, independent sandbox of the 
 The first run builds the base image (Fedora with git, ripgrep, gcc, node and the three agents), which takes a few
 minutes. The sandbox keeps running between sessions and stops itself after `idle_timeout` (10 minutes) without one.
 If the config changes while it runs (network, mounts, `readonly`, resources, ...), new sessions are refused until you
-stop it, so a sandbox never enforces an older policy.
+stop it (or pass `--replace`, which stops it and starts a new one, ending its other sessions), so a sandbox never
+enforces an older policy.
 
 | Command | |
 |---|---|
-| `agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]` | run a session; the exit code is the command's |
+| `agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]` | run a session; the exit code is the command's; `--replace` replaces a running sandbox whose config, git mode, image or binary is out of date |
 | `agent-sandbox init` | create `.agent-sandbox/{config.toml,Containerfile}` and trust them |
 | `agent-sandbox trust` | review `.agent-sandbox/` against the last approved version and approve it |
 | `agent-sandbox build [--no-cache] [--pull]` | rebuild images; `--pull` refreshes image and the agents |

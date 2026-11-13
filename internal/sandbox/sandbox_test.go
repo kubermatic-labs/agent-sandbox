@@ -66,6 +66,11 @@ func (w *world) handle(args []string) podmantest.Result {
 	case args[0] == "rm":
 		w.state = ""
 		return podmantest.Result{}
+	case args[0] == "stop":
+		if w.state == "running" {
+			w.state = "exited"
+		}
+		return podmantest.Result{}
 	case args[0] == "logs":
 		return podmantest.Result{Out: "nftables: operation not supported\n"}
 	case args[0] == "exec" && len(args) > 2 && args[2] == "test":
@@ -360,6 +365,41 @@ func TestConfigMismatchRefused(t *testing.T) {
 			if len(sessionExecs(f)) != 0 || len(f.CallsWith("run")) != 0 {
 				t.Errorf("%s: used or replaced a sandbox with another config: %q", name, f.Calls())
 			}
+		}
+	}
+}
+
+func TestReplaceMismatch(t *testing.T) {
+	for name, tt := range map[string]struct {
+		labels  string
+		replace bool
+	}{
+		"current":          {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, false},
+		"different config": {`{"agent-sandbox.config":"h0","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
+		"no config label":  {`{"agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
+		"other git mode":   {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"worktree","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
+		"old image":        {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img0","agent-sandbox.binary":"bin1"}`, true},
+		"old binary":       {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin0"}`, true},
+	} {
+		w := &world{state: "running", labels: tt.labels}
+		s, f, log := newSandbox(t, w)
+		s.ConfigHash, s.GitMode, s.ImageID, s.BinaryHash = "h1", "ro", "img1", "bin1"
+		s.Replace = true
+		if _, err := s.Exec(context.Background(), execArgv); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		replaced := len(f.CallsWith("stop")) == 1 && len(f.CallsWith("rm")) == 1 && len(f.CallsWith("run", "-d")) == 1
+		if replaced != tt.replace {
+			t.Errorf("%s: replaced=%v, want %v: %q", name, replaced, tt.replace, f.Calls())
+		}
+		if !tt.replace && (len(f.CallsWith("stop")) != 0 || len(f.CallsWith("rm")) != 0 || len(f.CallsWith("run")) != 0) {
+			t.Errorf("%s: touched a matching sandbox: %q", name, f.Calls())
+		}
+		if got := strings.Contains(log.String(), "replacing"); got != tt.replace {
+			t.Errorf("%s: log %q", name, log.String())
+		}
+		if len(sessionExecs(f)) != 1 {
+			t.Errorf("%s: sessions = %q", name, sessionExecs(f))
 		}
 	}
 }

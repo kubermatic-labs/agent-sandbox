@@ -66,7 +66,7 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
 ### 2.3 Commands
 
 ```
-agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
+agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
 agent-sandbox init                                    # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
@@ -102,9 +102,11 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
      `podman stop <container>`. The label is a sha256 of the `podman run` argv without the labels and the image, so it
      covers the network mode, `allow_cidrs`, `allow_domains`, `idle_timeout`, mounts and deny-list overlays,
      resources and the secrets env file. A sandbox started under an older policy would not enforce the current one;
+     with `--replace`, stop and remove it instead and continue as if absent (its other sessions end);
    - running with the same image ID and binary hash: use it;
    - running with a different image ID or binary hash: warn
      `sandbox runs an older image or agent-sandbox binary; 'agent-sandbox stop' to pick it up` and use it anyway;
+     with `--replace`, stop and remove it and continue as if absent;
    - exited (idle exit, `_init` failure, crash): if its exit code is non-zero, print its `podman logs`; remove it and
      continue as if absent;
    - absent: ensure the project volumes exist (section 3.5), `podman run` (section 4.1), then wait for ready

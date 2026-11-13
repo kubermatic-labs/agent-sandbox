@@ -61,9 +61,9 @@ func run(args []string, stderr io.Writer, cmds commands) int {
 
 func newRootCmd(code *int, cmds commands) *cobra.Command {
 	var name string
-	var strict, gc bool
+	var strict, gc, replace bool
 	root := &cobra.Command{
-		Use:           "agent-sandbox [-n NAME] [--strict] [--gc] [-- CMD ARGS...]",
+		Use:           "agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]",
 		Short:         "Run AI coding agents in a per-project rootless podman sandbox",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -79,7 +79,7 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 			if len(args) == 0 {
 				args = nil
 			}
-			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict, GC: gc})
+			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict, GC: gc, Replace: replace})
 			*code = c
 			return err
 		},
@@ -87,6 +87,7 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
 	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
 	root.Flags().BoolVar(&gc, "gc", false, "worktree mode: run git gc on the host first, so the agent cannot touch unpacked objects")
+	root.Flags().BoolVar(&replace, "replace", false, "stop a running sandbox whose config, git mode, image or binary differs (ending its sessions) and start a new one")
 	root.AddCommand(
 		newScaffoldCmd(cmds), newTrustCmd(cmds.trust), newBuildCmd(cmds.build),
 		newStatusCmd(cmds), newStopCmd(cmds), newWorktreeCmd(cmds),

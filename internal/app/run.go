@@ -28,10 +28,11 @@ import (
 
 // RunOptions are the main command's arguments.
 type RunOptions struct {
-	Name   string
-	Cmd    []string // after --; empty means config command or bash -l
-	Strict bool     // refuse to start while earlier scan findings exist
-	GC     bool     // worktree mode: git gc on the host before starting
+	Name    string
+	Cmd     []string // after --; empty means config command or bash -l
+	Strict  bool     // refuse to start while earlier scan findings exist
+	GC      bool     // worktree mode: git gc on the host before starting
+	Replace bool     // replace a running sandbox that does not match
 }
 
 // Run is the main entry: trust, ensure images, ensure running, exec. It
@@ -185,6 +186,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		BinaryHash:   binHash,
 		GitMode:      cfg.Git,
 		ConfigHash:   sandbox.ConfigHash(runIn),
+		Replace:      o.Replace,
 	}
 	code, err := sb.Exec(ctx, execArgv)
 	if err != nil {

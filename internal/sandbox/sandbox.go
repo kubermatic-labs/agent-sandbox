@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"k8c.io/agent-sandbox/internal/flock"
@@ -46,6 +47,10 @@ type Sandbox struct {
 	// ConfigHash (ConfigHash of the run input) must match the running
 	// container's ConfigLabel: otherwise it enforces an older policy.
 	ConfigHash string
+	// Replace stops and removes a running container that does not match
+	// (git mode, config, image or binary) instead of refusing or warning,
+	// and starts a new one. Sessions still in the old one are killed.
+	Replace bool
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -87,17 +92,41 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, c := range cs {
-		if c.State == "running" {
-			if mode := c.Labels["agent-sandbox.git-mode"]; s.GitMode != "" && mode != s.GitMode {
-				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first", mode, s.GitMode, s.Container)
+	for i, c := range cs {
+		if c.State != "running" {
+			continue
+		}
+		var reason string
+		switch mode := c.Labels["agent-sandbox.git-mode"]; {
+		case s.GitMode != "" && mode != s.GitMode:
+			if !s.Replace {
+				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first, or use --replace", mode, s.GitMode, s.Container)
 			}
-			if s.ConfigHash != "" && c.Labels[ConfigLabel] != s.ConfigHash {
-				return fmt.Errorf("the running sandbox was started with a different configuration (network, mounts, readonly, resources, ...) and would not enforce the current one; 'podman stop %s' first", s.Container)
+			reason = "it uses another git mode"
+		case s.ConfigHash != "" && c.Labels[ConfigLabel] != s.ConfigHash:
+			if !s.Replace {
+				return fmt.Errorf("the running sandbox was started with a different configuration (network, mounts, readonly, resources, ...) and would not enforce the current one; 'podman stop %s' first, or use --replace", s.Container)
 			}
-			s.warnIfStale(c)
+			reason = "it was started with a different configuration"
+		case s.stale(c):
+			if !s.Replace {
+				// Used anyway: an older image or binary enforces the same policy.
+				fmt.Fprintf(s.Log, "agent-sandbox: the sandbox runs an older image or agent-sandbox binary; 'podman stop %s' or --replace to pick up the new one\n", s.Container)
+				return nil
+			}
+			reason = "it runs an older image or agent-sandbox binary"
+		default:
 			return nil
 		}
+		fmt.Fprintf(s.Log, "agent-sandbox: replacing the running sandbox (%s); its sessions end\n", reason)
+		if err := s.Podman.Stop(ctx, c.ID, 10); err != nil {
+			return fmt.Errorf("stopping the old sandbox: %w", err)
+		}
+		if err := s.Podman.Remove(ctx, c.ID); err != nil {
+			return fmt.Errorf("removing the old sandbox: %w", err)
+		}
+		cs = slices.Delete(cs, i, i+1)
+		break
 	}
 	for _, c := range cs {
 		if c.ExitCode != 0 {
@@ -173,14 +202,11 @@ func (s *Sandbox) failStart(ctx context.Context, msg string) error {
 	return errors.New(msg)
 }
 
-// warnIfStale tells the user when the running sandbox was started from an
-// older image or binary. It is used anyway; stopping it picks up the new one.
-func (s *Sandbox) warnIfStale(c podman.Container) {
-	stale := (s.ImageID != "" && c.Labels["agent-sandbox.image-id"] != s.ImageID) ||
+// stale reports whether the running sandbox was started from an older image
+// or binary.
+func (s *Sandbox) stale(c podman.Container) bool {
+	return (s.ImageID != "" && c.Labels["agent-sandbox.image-id"] != s.ImageID) ||
 		(s.BinaryHash != "" && c.Labels["agent-sandbox.binary"] != s.BinaryHash)
-	if stale {
-		fmt.Fprintf(s.Log, "agent-sandbox: the sandbox runs an older image or agent-sandbox binary; 'podman stop %s' to pick up the new one\n", s.Container)
-	}
 }
 
 func (s *Sandbox) running(ctx context.Context) (bool, error) {
