@@ -1,6 +1,6 @@
 # agent-sandbox base image (embedded in the binary; override with
 # ~/.config/agent-sandbox/base/Containerfile).
-FROM registry.fedoraproject.org/fedora:44
+FROM registry.fedoraproject.org/fedora:45
 
 RUN dnf -y install --setopt=install_weak_deps=False \
         git ripgrep fd-find jq curl make gcc procps-ng less which ca-certificates \
