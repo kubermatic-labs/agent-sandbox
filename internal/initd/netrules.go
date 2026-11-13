@@ -222,7 +222,9 @@ func Render(rules []Rule) string {
 	var b strings.Builder
 	b.WriteString("table inet asb {\n\tchain output {\n\t\ttype filter hook output priority filter; policy accept;\n")
 	for _, r := range rules {
-		b.WriteString("\t\t" + r.String() + "\n")
+		b.WriteString("\t\t")
+		b.WriteString(r.String())
+		b.WriteString("\n")
 	}
 	b.WriteString("\t}\n}\n")
 	return b.String()
