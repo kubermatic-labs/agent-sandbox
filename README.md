@@ -22,8 +22,7 @@ install -m 0755 dist/agent-sandbox ~/.local/bin/
 ln -s agent-sandbox ~/.local/bin/asb     # optional short name
 ```
 
-Agents authenticate through `~/.config/agent-sandbox/secrets.env` (mode 0600), since each project gets its own home
-volume:
+Agents can authenticate through `~/.config/agent-sandbox/secrets.env` (see [Secrets](#secrets)):
 
 ```sh
 claude setup-token               # on the host, once
@@ -31,7 +30,32 @@ printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<token>" > ~/.config/agent-sandbox/secret
 chmod 600 ~/.config/agent-sandbox/secrets.env
 ```
 
-Add `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and similar there as needed.
+## Secrets
+
+Each project gets its own home volume, so a `claude login` or `opencode auth login` inside one sandbox does not carry
+over to the next, and host logins (`~/.claude`, `~/.config/opencode`, ...) are never mounted. Instead, agent credentials
+live in one file, `~/.config/agent-sandbox/secrets.env`, which is passed to every sandbox of every project as
+environment variables (`podman run --env-file`):
+
+```sh
+# ~/.config/agent-sandbox/secrets.env, one KEY=value per line
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...    # from `claude setup-token`, or:
+ANTHROPIC_API_KEY=sk-ant-api03-...
+OPENAI_API_KEY=sk-...
+```
+
+- The file is optional. If it exists it must be a regular file with mode exactly `0600`; otherwise agent-sandbox
+  refuses to start and prints the `chmod` to run.
+- It is global only. A project's `.agent-sandbox/config.toml` cannot name another env file, and `env` there is for
+  non-secret settings: it is part of the repository and shown in the trust prompt.
+- It is read when the sandbox container starts. Editing it does not affect a running sandbox; run
+  `agent-sandbox stop` (or `--replace`) to pick up new values. Creating or deleting the file changes the sandbox's
+  config, so new sessions are refused until it is restarted.
+- Values are visible on the host to anyone who can run `podman inspect` as your user.
+- Put only what the agents need there. Everything in it is readable by the agent (see
+  [Residual risks](#residual-risks)); use narrowly scoped tokens you can revoke, not personal long-lived keys. For
+  other credentials a project needs (a kubeconfig, a registry token), prefer a read-only entry in `mounts` scoped to
+  that project.
 
 ## Usage
 
