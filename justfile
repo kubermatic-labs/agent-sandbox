@@ -18,7 +18,6 @@ test:
 integration:
     go test -tags integration -count=1 -timeout 30m ./test/...
 
-# Override the linter binary with GOLANGCI_LINT=/path/to/golangci-lint.
 lint:
     gofmt -l . | (! grep .)
     go vet ./...

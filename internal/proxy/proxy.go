@@ -75,16 +75,16 @@ func New(p Policy, log io.Writer) *Server {
 		Policy: p,
 		Dial:   d.DialContext,
 		Log:    log,
-		tr: &http.Transport{
-			Proxy: nil,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return d.DialContext(ctx, network, addr)
-			},
-			ResponseHeaderTimeout: 2 * time.Minute,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   8,
-			IdleConnTimeout:       90 * time.Second,
+	}
+	s.tr = &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return s.Dial(ctx, network, addr)
 		},
+		ResponseHeaderTimeout: 2 * time.Minute,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
 	}
 
 	return s
