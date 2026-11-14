@@ -16,6 +16,6 @@ require (
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
 )
