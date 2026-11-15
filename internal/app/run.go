@@ -33,6 +33,7 @@ type RunOptions struct {
 	Strict  bool     // refuse to start while earlier scan findings exist
 	GC      bool     // worktree mode: git gc on the host before starting
 	Replace bool     // replace a running sandbox that does not match
+	Git     string   // overrides the config's git mode for this run; "" means the config's
 }
 
 // Run is the main entry: trust, ensure images, ensure running, exec. It
@@ -57,6 +58,12 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	cfg, err := e.loadConfig(state)
 	if err != nil {
 		return 1, err
+	}
+	if o.Git != "" {
+		if err := config.CheckGitMode(o.Git); err != nil {
+			return 1, err
+		}
+		cfg.Git = o.Git
 	}
 	statePath := scan.StatePath(p.DataDir, proj.ID)
 	if o.Strict || cfg.Strict {
@@ -177,6 +184,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		ImageID:      im.imageID,
 		BinaryHash:   binHash,
 		GitMode:      cfg.Git,
+		GitOverride:  o.Git != "",
 		ConfigHash:   sandbox.ConfigHash(runIn),
 		Replace:      o.Replace,
 	}

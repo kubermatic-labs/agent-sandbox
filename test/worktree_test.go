@@ -160,3 +160,39 @@ func TestWorktreePostScan(t *testing.T) {
 		t.Errorf("the worktree's own .git file reported: %q", r.stderr)
 	}
 }
+
+func TestGitFlagOverridesConfig(t *testing.T) {
+	e := newProject(t, openNetwork) // git = "ro" by default
+	e.git("checkout", "-q", "-b", "main")
+	e.writeFile("README.md", "hello\n")
+	e.git("add", ".")
+	e.git("commit", "-q", "-m", "init")
+	wt := filepath.Join(e.dataHome, "worktrees", e.id, "wt")
+
+	if r := e.run(e.root, "", "--git", "worktree", "--", "true"); r.code == 0 || !strings.Contains(r.stderr, "requires -n") {
+		t.Fatalf("--git without -n: exit %d, stderr %q", r.code, r.stderr)
+	}
+	got := e.mustRun(e.root, "", "-n", "wt", "--git", "worktree", "--", "sh", "-c",
+		"pwd && echo change >> README.md && git commit -qam 'agent change'")
+	if got != wt+"\n" {
+		t.Errorf("pwd = %q, want %q", got, wt)
+	}
+	if s := e.git("log", "-1", "--format=%s", "asb/wt"); s != "agent change" {
+		t.Errorf("asb/wt tip on the host = %q", s)
+	}
+	// wt keeps running in worktree mode: the config's ro mode, or a --git ro
+	// override even with --replace, must not take it over.
+	if r := e.run(e.root, "", "-n", "wt", "--", "true"); r.code == 0 || !strings.Contains(r.stderr, "git mode") {
+		t.Errorf("config mode on a worktree sandbox: exit %d, stderr %q", r.code, r.stderr)
+	}
+	if r := e.run(e.root, "", "-n", "wt", "--git", "ro", "--replace", "--", "true"); r.code == 0 || !strings.Contains(r.stderr, "another -n NAME") {
+		t.Errorf("--git ro --replace: exit %d, stderr %q", r.code, r.stderr)
+	}
+	// The default sandbox still follows the config.
+	if got := e.mustRun(e.root, "", "--", "pwd"); got != e.root+"\n" {
+		t.Errorf("default sandbox pwd = %q", got)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("worktree gone after the run: %v", err)
+	}
+}

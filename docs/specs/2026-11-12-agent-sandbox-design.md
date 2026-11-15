@@ -66,7 +66,7 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
 ### 2.3 Commands
 
 ```
-agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
+agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
 agent-sandbox init [--base IMAGE]                     # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
@@ -78,6 +78,10 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
 
 - Without `-- CMD`, run `command` from the config, or `bash -l` if it is unset. Unknown positional arguments are an
   error, so they are never treated as a command.
+- `--git ro|worktree` overrides the config's `git` for this invocation only; nothing is saved. It requires an explicit
+  `-n NAME`, so a one-off mode never lands on the default sandbox. A running sandbox of that name in another git mode
+  is refused even with `--replace` (pick another name). A worktree created this way outlives the run like any other
+  (section 5.3); later runs of that name need `--git worktree` again.
 - A TTY is allocated (`-it`) only when stdin is a terminal, so `echo ... | agent-sandbox -- claude -p` works.
 - The exit code of the exec'd command is passed through.
 - An `asb` symlink to the binary behaves the same.
@@ -100,6 +104,8 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
    parallel invocations build each tag once.
 5. Take `flock` on `$XDG_RUNTIME_DIR/agent-sandbox/<container>.lock`.
 6. Find the container by labels:
+   - running with a different git mode while the mode comes from `--git`: refuse, even with `--replace`, and ask for
+     another `-n NAME`;
    - running with a different git mode, or a different (or no) `agent-sandbox.config` label: refuse and ask for
      `podman stop <container>`. The label is a sha256 of the `podman run` argv without the labels and the image, so it
      covers the network mode, `allow_cidrs`, `allow_domains`, `idle_timeout`, mounts and deny-list overlays,

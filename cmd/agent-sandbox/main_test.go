@@ -78,6 +78,8 @@ func TestArgs(t *testing.T) {
 		{[]string{"--strict", "--", "ls"}, app.RunOptions{Name: "default", Cmd: []string{"ls"}, Strict: true}},
 		{[]string{"--gc", "-n", "x"}, app.RunOptions{Name: "x", GC: true}},
 		{[]string{"--replace"}, app.RunOptions{Name: "default", Replace: true}},
+		{[]string{"-n", "wt", "--git", "worktree"}, app.RunOptions{Name: "wt", Git: "worktree"}},
+		{[]string{"--git=ro", "--name=x"}, app.RunOptions{Name: "x", Git: "ro"}},
 	}
 	for _, tt := range tests {
 		r := &recorder{}
@@ -93,6 +95,17 @@ func TestArgs(t *testing.T) {
 		if diff := cmp.Diff(tt.want, r.runs[0]); diff != "" {
 			t.Errorf("%q (-want +got):\n%s", tt.args, diff)
 		}
+	}
+}
+
+func TestGitRequiresName(t *testing.T) {
+	r := &recorder{}
+	var stderr bytes.Buffer
+	if code := run([]string{"--git", "worktree"}, &stderr, r.cmds()); code == 0 || !strings.Contains(stderr.String(), "requires -n") {
+		t.Errorf("exit %d, stderr %q", code, stderr.String())
+	}
+	if len(r.runs) != 0 {
+		t.Errorf("ran without -n: %v", r.runs)
 	}
 }
 

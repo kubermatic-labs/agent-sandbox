@@ -342,6 +342,18 @@ func TestGitModeMismatchRefused(t *testing.T) {
 	}
 }
 
+func TestGitOverrideNeverReplaces(t *testing.T) {
+	w := &world{state: "running", labels: `{"agent-sandbox.git-mode":"ro"}`}
+	s, f, _ := newSandbox(t, w)
+	s.GitMode, s.GitOverride, s.Replace = "worktree", true, true
+	if _, err := s.Exec(context.Background(), execArgv); err == nil || !strings.Contains(err.Error(), "another -n NAME") {
+		t.Errorf("err = %v", err)
+	}
+	if len(f.CallsWith("stop")) != 0 || len(sessionExecs(f)) != 0 {
+		t.Error("a --git override replaced or used a sandbox in another git mode")
+	}
+}
+
 func TestConfigMismatchRefused(t *testing.T) {
 	for name, tt := range map[string]struct {
 		labels string

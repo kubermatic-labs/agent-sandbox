@@ -65,6 +65,7 @@ agent-sandbox -- claude                  # start (or reuse) the sandbox and run 
 agent-sandbox                            # run `command` from the config, or bash -l
 echo "fix the tests" | agent-sandbox -- claude -p
 agent-sandbox -n feature -- claude       # a second, independent sandbox of the same project
+agent-sandbox -n fix --git worktree -- claude   # this run in worktree mode, whatever the config says
 ```
 
 The first run builds the base image (Fedora by default, with git, ripgrep, gcc, node and the three agents), which
@@ -75,7 +76,7 @@ enforces an older policy.
 
 | Command | |
 |---|---|
-| `agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]` | run a session; the exit code is the command's; `--replace` replaces a running sandbox whose config, git mode, image or binary is out of date |
+| `agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS...]` | run a session; the exit code is the command's; `--replace` replaces a running sandbox whose config, git mode, image or binary is out of date; `--git ro\|worktree` overrides `git` for this run (requires `-n`, never replaces a sandbox running in another mode) |
 | `agent-sandbox init [--base IMAGE]` | create `.agent-sandbox/{config.toml,Containerfile}` and trust them; `--base` sets `base` in `config.toml` |
 | `agent-sandbox trust` | review `.agent-sandbox/` against the last approved version and approve it |
 | `agent-sandbox build [--no-cache] [--pull]` | rebuild images; `--pull` refreshes image and the agents |
@@ -159,6 +160,9 @@ has no capabilities and cannot change them.
   `asb/<name>`, which you can see and review on the host at once. The agent can commit, amend, rebase and reset there,
   and create `asb/*` branches. It cannot move other branches, create tags, stash, change the repository config or
   hooks, or touch packed history. Not supported for reftable repositories.
+
+`--git MODE` picks the mode for one run without editing the config. It requires `-n NAME`; a worktree it creates stays
+(remove it with `worktree rm`), and later runs of that name need `--git worktree` again.
 
 In both modes these are read-only inside the sandbox when they exist: `.agent-sandbox/`, `.git`, `.envrc`,
 `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks`, `.mcp.json`, `.opencode`, `.codex`,

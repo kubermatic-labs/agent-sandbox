@@ -44,6 +44,10 @@ type Sandbox struct {
 	BinaryHash string
 	// GitMode must match the running container's: its mounts differ.
 	GitMode string
+	// GitOverride means GitMode comes from --git, not the config. A running
+	// container in another git mode is then refused even with Replace: a
+	// one-off mode must not take over a sandbox (spec 2.4).
+	GitOverride bool
 	// ConfigHash (ConfigHash of the run input) must match the running
 	// container's ConfigLabel: otherwise it enforces an older policy.
 	ConfigHash string
@@ -99,6 +103,9 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 		var reason string
 		switch mode := c.Labels["agent-sandbox.git-mode"]; {
 		case s.GitMode != "" && mode != s.GitMode:
+			if s.GitOverride {
+				return fmt.Errorf("sandbox %s is running in git mode %q, not %q; use another -n NAME for --git %s", s.Container, mode, s.GitMode, s.GitMode)
+			}
 			if !s.Replace {
 				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first, or use --replace", mode, s.GitMode, s.Container)
 			}

@@ -61,10 +61,10 @@ func run(args []string, stderr io.Writer, cmds commands) int {
 }
 
 func newRootCmd(code *int, cmds commands) *cobra.Command {
-	var name string
+	var name, git string
 	var strict, gc, replace bool
 	root := &cobra.Command{
-		Use:           "agent-sandbox [-n NAME] [--strict] [--gc] [--replace] [-- CMD ARGS...]",
+		Use:           "agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS...]",
 		Short:         "Run AI coding agents in a per-project rootless podman sandbox",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -80,12 +80,18 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 			if len(args) == 0 {
 				args = nil
 			}
-			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict, GC: gc, Replace: replace})
+			// A one-off git mode needs its own sandbox name, so it never
+			// collides with the config's mode on the default sandbox.
+			if cmd.Flags().Changed("git") && !cmd.Flags().Changed("name") {
+				return errors.New("--git requires -n NAME")
+			}
+			c, err := cmds.run(cmd.Context(), app.RunOptions{Name: name, Cmd: args, Strict: strict, GC: gc, Replace: replace, Git: git})
 			*code = c
 			return err
 		},
 	}
 	root.Flags().StringVarP(&name, "name", "n", "default", "sandbox name")
+	root.Flags().StringVar(&git, "git", "", "git mode for this run, overriding the config: ro or worktree (requires -n)")
 	root.Flags().BoolVar(&strict, "strict", false, "refuse to start while findings of an earlier post-session scan still exist")
 	root.Flags().BoolVar(&gc, "gc", false, "worktree mode: run git gc on the host first, so the agent cannot touch unpacked objects")
 	root.Flags().BoolVar(&replace, "replace", false, "stop a running sandbox whose config, git mode, image or binary differs (ending its sessions) and start a new one")

@@ -18,6 +18,14 @@ var (
 	gitModes = []string{"ro", "worktree"}
 )
 
+// CheckGitMode reports whether mode is a valid git mode (the --git flag).
+func CheckGitMode(mode string) error {
+	if !slices.Contains(gitModes, mode) {
+		return fmt.Errorf("git mode %q is not one of %s", mode, strings.Join(gitModes, ", "))
+	}
+	return nil
+}
+
 // CacheVolume is one named volume a cache preset mounts.
 type CacheVolume struct {
 	Suffix string // volume name is asb-<project-id>-<Suffix>
