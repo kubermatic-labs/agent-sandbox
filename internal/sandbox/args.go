@@ -162,8 +162,11 @@ type ExecInput struct {
 	Cmd       []string
 }
 
-// passEnv are taken from the host environment when set there.
-var passEnv = []string{"TERM", "COLORTERM", "LANG"}
+// passEnv are taken from the host environment when set there. ZELLIJ is a
+// bare marker (the zellij socket is not mounted): agents need it to know they
+// run inside zellij, e.g. Claude Code must not use DECSTBM scroll regions
+// there, or scrolling leaves stale lines on screen.
+var passEnv = []string{"TERM", "COLORTERM", "LANG", "ZELLIJ"}
 
 // sessionEnv keeps agents from waiting on blocked telemetry (spec 3.1).
 var sessionEnv = []string{"DISABLE_TELEMETRY=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}

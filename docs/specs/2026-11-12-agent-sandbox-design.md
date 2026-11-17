@@ -372,11 +372,14 @@ to 10 s. On timeout, or if the container exits first, it prints `podman logs`, t
 
 ```
 podman exec [-it] --user <uid>:<gid> --workdir <mapped cwd>
-  --env TERM --env COLORTERM --env LANG
+  --env TERM --env COLORTERM --env LANG --env ZELLIJ
   --env <config env> --env <cache env> [--env HTTP(S)_PROXY/NO_PROXY in allowlist mode]
   --env GIT_CONFIG_COUNT=... (worktree mode, see 5.3)
   <container> <cmd...>
 ```
+
+`ZELLIJ` is passed so agents detect the multiplexer (Claude Code avoids DECSTBM scroll regions under zellij); it is a
+bare marker, the zellij socket is not mounted.
 
 Exec'd processes run as the host UID with no capabilities. `no-new-privileges` blocks setuid binaries and `sudo`.
 Wrapper-set env (proxy, `GIT_CONFIG_*`, cache vars) is passed after config `env`, and config `env` cannot set those
