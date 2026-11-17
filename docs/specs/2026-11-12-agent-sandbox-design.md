@@ -70,7 +70,7 @@ agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS.
 agent-sandbox init [--base IMAGE] [--caches LIST]     # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
-agent-sandbox status [--all]                          # sandboxes for this project (or all, plus volumes): name, state, uptime, sessions, stale, git mode
+agent-sandbox status [--all]                          # sandboxes for this project (or all, plus volumes): name, container ID, state, uptime, sessions, stale, git mode
 agent-sandbox stop [-n NAME | --all]                  # stop now instead of waiting for idle; --all = every sandbox of this project
 agent-sandbox worktree list                           # name, branch, ahead of HEAD, dirty, running
 agent-sandbox worktree rm NAME [--force] [--delete-branch]

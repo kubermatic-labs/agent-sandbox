@@ -25,6 +25,14 @@ import (
 	"k8c.io/agent-sandbox/internal/worktree"
 )
 
+// shortID abbreviates a container ID the way podman ps does.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
 // Status lists the sandboxes of this project, or of all projects, with
 // their volumes in the latter case (spec 2.3, 3.5).
 func Status(ctx context.Context, all bool, out io.Writer) error {
@@ -56,7 +64,7 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 	if len(cs) == 0 {
 		fmt.Fprintln(out, "no sandboxes")
 	} else {
-		fmt.Fprintln(tw, "NAME\tSTATE\tUPTIME\tSESSIONS\tSTALE\tGIT\tPROJECT")
+		fmt.Fprintln(tw, "NAME\tCONTAINER\tSTATE\tUPTIME\tSESSIONS\tSTALE\tGIT\tPROJECT")
 		for _, c := range cs {
 			uptime, sessions := "-", "-"
 			if c.State == "running" {
@@ -69,8 +77,8 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 			if e.isStale(ctx, c, binHash) {
 				stale = "yes"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				c.Labels["agent-sandbox.name"], c.State, uptime, sessions, stale,
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				c.Labels["agent-sandbox.name"], shortID(c.ID), c.State, uptime, sessions, stale,
 				c.Labels["agent-sandbox.git-mode"], c.Labels["agent-sandbox.project"])
 		}
 		if err := tw.Flush(); err != nil {
