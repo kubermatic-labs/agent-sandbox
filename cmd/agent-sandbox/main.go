@@ -28,7 +28,7 @@ type commands struct {
 	stop         func(ctx context.Context, name string, all bool, out io.Writer) error
 	worktreeList func(ctx context.Context, out io.Writer) error
 	worktreeRm   func(ctx context.Context, name string, force, deleteBranch bool, out io.Writer) error
-	scaffold     func(ctx context.Context, base string, out io.Writer) error
+	scaffold     func(ctx context.Context, o app.InitOptions, out io.Writer) error
 }
 
 func main() {
@@ -104,16 +104,18 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 }
 
 func newScaffoldCmd(cmds commands) *cobra.Command {
-	var base string
+	var o app.InitOptions
 	cmd := &cobra.Command{
-		Use:   "init [--base IMAGE]",
+		Use:   "init [--base IMAGE] [--caches LIST]",
 		Short: "Create .agent-sandbox/{config.toml,Containerfile} and trust them",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmds.scaffold(cmd.Context(), base, cmd.OutOrStdout())
+			o.DetectCaches = !cmd.Flags().Changed("caches")
+			return cmds.scaffold(cmd.Context(), o, cmd.OutOrStdout())
 		},
 	}
-	cmd.Flags().StringVar(&base, "base", "", "base image, written to config.toml: "+strings.Join(config.Bases, ", ")+" (default: the global config's, else "+config.Bases[0]+")")
+	cmd.Flags().StringVar(&o.Base, "base", "", "base image, written to config.toml: "+strings.Join(config.Bases, ", ")+" (default: the global config's, else "+config.Bases[0]+")")
+	cmd.Flags().StringSliceVar(&o.Caches, "caches", nil, "comma-separated cache presets, written to config.toml: go, npm, pip; --caches= for none (default: detected from go.mod, package.json, requirements.txt, pyproject.toml, ... at the project root)")
 	return cmd
 }
 

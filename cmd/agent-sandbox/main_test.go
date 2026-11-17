@@ -43,8 +43,8 @@ func (r *recorder) cmds() commands {
 			r.calls = append(r.calls, fmt.Sprintf("worktree rm %s force=%v delete=%v", name, force, del))
 			return r.err
 		},
-		scaffold: func(_ context.Context, base string, _ io.Writer) error {
-			r.calls = append(r.calls, "init base="+base)
+		scaffold: func(_ context.Context, o app.InitOptions, _ io.Writer) error {
+			r.calls = append(r.calls, fmt.Sprintf("init base=%s caches=%q detect=%v", o.Base, o.Caches, o.DetectCaches))
 			return r.err
 		},
 	}
@@ -170,8 +170,11 @@ func TestManagementCommands(t *testing.T) {
 		{[]string{"worktree", "list"}, "worktree list", 0},
 		{[]string{"worktree", "rm", "dev", "--force", "--delete-branch"}, "worktree rm dev force=true delete=true", 0},
 		{[]string{"worktree", "rm"}, "", 1},
-		{[]string{"init"}, "init base=", 0},
-		{[]string{"init", "--base", "alpine:3"}, "init base=alpine:3", 0},
+		{[]string{"init"}, `init base= caches=[] detect=true`, 0},
+		{[]string{"init", "--base", "alpine:3"}, `init base=alpine:3 caches=[] detect=true`, 0},
+		{[]string{"init", "--caches", "go,npm"}, `init base= caches=["go" "npm"] detect=false`, 0},
+		{[]string{"init", "--caches=pip", "--caches", "go"}, `init base= caches=["pip" "go"] detect=false`, 0},
+		{[]string{"init", "--caches="}, `init base= caches=[] detect=false`, 0},
 		{[]string{"init", "x"}, "", 1},
 	} {
 		r := &recorder{}

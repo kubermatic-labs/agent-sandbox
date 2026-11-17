@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -310,17 +311,69 @@ func WorktreeRm(ctx context.Context, name string, force, deleteBranch bool, out 
 	return nil
 }
 
+// InitOptions are the init flags.
+type InitOptions struct {
+	// Base, if not empty (one of config.Bases), is written to config.toml.
+	Base string
+	// Caches, if DetectCaches is false, are the cache presets written to
+	// config.toml; empty leaves the caches key commented out.
+	Caches []string
+	// DetectCaches picks the cache presets from the project's files instead.
+	DetectCaches bool
+}
+
+// cacheMarkers maps each cache preset to the files at the project root that
+// select it in init's detection.
+var cacheMarkers = []struct {
+	preset string
+	files  []string
+}{
+	{"go", []string{"go.mod", "go.work"}},
+	{"npm", []string{"package.json"}},
+	{"pip", []string{"requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"}},
+}
+
+// detectCaches returns the cache presets whose marker files exist at the
+// project root. It only stats the root: no subdirectories, no git.
+func detectCaches(root string) []string {
+	var caches []string
+	for _, m := range cacheMarkers {
+		for _, f := range m.files {
+			if fi, err := os.Stat(filepath.Join(root, f)); err == nil && fi.Mode().IsRegular() {
+				caches = append(caches, m.preset)
+				break
+			}
+		}
+	}
+	return caches
+}
+
 // Init scaffolds .agent-sandbox/ and records it as trusted (spec 3.4). A
 // non-empty base (one of config.Bases) is written to config.toml; otherwise
 // the base key stays commented out and the global config or the default
-// applies.
-func Init(_ context.Context, base string, out io.Writer) error {
+// applies. Cache presets are written the same way, either given or detected
+// from the project's files.
+func Init(_ context.Context, o InitOptions, out io.Writer) error {
+	base := o.Base
 	if base != "" && !slices.Contains(config.Bases, base) {
 		return fmt.Errorf("--base %q is not one of %s", base, strings.Join(config.Bases, ", "))
+	}
+	var caches []string
+	for _, c := range o.Caches {
+		if c = strings.TrimSpace(c); c == "" || slices.Contains(caches, c) {
+			continue
+		}
+		if _, ok := config.CachePresets[c]; !ok {
+			return fmt.Errorf("--caches %q is not one of %s", c, strings.Join(cachePresetNames(), ", "))
+		}
+		caches = append(caches, c)
 	}
 	e, err := resolve()
 	if err != nil {
 		return err
+	}
+	if o.DetectCaches {
+		caches = detectCaches(e.proj.Root)
 	}
 	dir := filepath.Join(e.proj.Root, trust.DirName)
 	if _, err := os.Lstat(dir); err == nil {
@@ -329,7 +382,7 @@ func Init(_ context.Context, base string, out io.Writer) error {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return err
 	}
-	files := map[string]string{"config.toml": scaffoldConfig(base), "Containerfile": scaffoldContainerfile(base)}
+	files := map[string]string{"config.toml": scaffoldConfig(base, caches), "Containerfile": scaffoldContainerfile(base)}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
@@ -345,12 +398,33 @@ func Init(_ context.Context, base string, out io.Writer) error {
 			return err
 		}
 	}
+	if len(caches) > 0 {
+		how := ""
+		if o.DetectCaches {
+			how = " (detected; override with --caches)"
+		}
+		fmt.Fprintf(out, "caches: %s%s\n", strings.Join(caches, ", "), how)
+	}
 	fmt.Fprintf(out, "created %s/config.toml and %s/Containerfile (trusted); after editing them, run 'agent-sandbox trust'\n", dir, dir)
 	return nil
 }
 
-// baseTemplateLine is the base line of configTemplate.
-const baseTemplateLine = `# base          = "fedora:45"         # fedora:45 | debian:12 | ubuntu:26.04 | alpine:3`
+// cachePresetNames returns the known cache presets, sorted.
+func cachePresetNames() []string {
+	names := make([]string, 0, len(config.CachePresets))
+	for k := range config.CachePresets {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// baseTemplateLine and cachesTemplateLine are lines of configTemplate that
+// init can set.
+const (
+	baseTemplateLine   = `# base          = "fedora:45"         # fedora:45 | debian:12 | ubuntu:26.04 | alpine:3`
+	cachesTemplateLine = `# caches        = ["go"]              # go | npm | pip`
+)
 
 const configTemplate = `# agent-sandbox project config. Changes need approval: 'agent-sandbox trust'.
 # The global config is ~/.config/agent-sandbox/config.toml; lists add up,
@@ -367,7 +441,7 @@ const configTemplate = `# agent-sandbox project config. Changes need approval: '
 # worktree_copy = []                  # worktree mode: untracked files copied into a new worktree
 # env           = {}
 # mounts        = []                  # [{ src = "~/.kube/kind.yaml", dst = "~/.kube/config", ro = true }]
-# caches        = ["go"]              # go | npm | pip
+` + cachesTemplateLine + `
 # resources     = { memory = "8g", cpus = 4, pids = 4096 }
 # strict        = false               # refuse to start while scan findings are unresolved
 # git_user_name  = ""                 # worktree mode commit identity, default "agent-sandbox (<name>)"
@@ -384,13 +458,28 @@ FROM ${BASE_IMAGE}
 `
 
 // scaffoldConfig returns the config.toml init writes: configTemplate, with
-// the base key set if base is not empty.
-func scaffoldConfig(base string) string {
-	if base == "" {
-		return configTemplate
+// the base and caches keys set if not empty.
+func scaffoldConfig(base string, caches []string) string {
+	cfg := configTemplate
+	if base != "" {
+		cfg = setTemplateLine(cfg, baseTemplateLine, `"fedora:45"`, strconv.Quote(base))
 	}
-	line := strings.TrimPrefix(strings.Replace(baseTemplateLine, `"fedora:45"`, fmt.Sprintf("%-11q", base), 1), "# ")
-	return strings.Replace(configTemplate, baseTemplateLine, line, 1)
+	if len(caches) > 0 {
+		quoted := make([]string, len(caches))
+		for i, c := range caches {
+			quoted[i] = strconv.Quote(c)
+		}
+		cfg = setTemplateLine(cfg, cachesTemplateLine, `["go"]`, "["+strings.Join(quoted, ", ")+"]")
+	}
+	return cfg
+}
+
+// setTemplateLine uncomments line in cfg and replaces its example value,
+// keeping the trailing comment aligned where the new value fits.
+func setTemplateLine(cfg, line, example, value string) string {
+	i, j := strings.Index(line, example), strings.LastIndex(line, " # ")
+	set := line[:i] + fmt.Sprintf("%-*s", j-i, value) + line[j:]
+	return strings.Replace(cfg, line, strings.TrimPrefix(set, "# "), 1)
 }
 
 // scaffoldContainerfile returns the Containerfile init writes, with an

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +39,7 @@ func TestTemplates(t *testing.T) {
 	if _, err := toml.Decode(configTemplate, &m); err != nil || len(m) != 0 {
 		t.Errorf("config template must parse to nothing (all commented): %v, %v", m, err)
 	}
-	if scaffoldConfig("") != configTemplate {
+	if scaffoldConfig("", nil) != configTemplate {
 		t.Error("config scaffold without --base must be the template")
 	}
 	for _, base := range append([]string{""}, config.Bases...) {
@@ -51,7 +54,7 @@ func TestTemplates(t *testing.T) {
 			continue
 		}
 		var got map[string]any
-		if _, err := toml.Decode(scaffoldConfig(base), &got); err != nil || len(got) != 1 || got["base"] != base {
+		if _, err := toml.Decode(scaffoldConfig(base, nil), &got); err != nil || len(got) != 1 || got["base"] != base {
 			t.Errorf("config scaffold for %q = %v, %v; want only base set", base, got, err)
 		}
 	}
@@ -60,5 +63,58 @@ func TestTemplates(t *testing.T) {
 		if !strings.Contains(configTemplate, "\n# "+k+" ") {
 			t.Errorf("config template does not mention %q", k)
 		}
+	}
+}
+
+func TestScaffoldConfigCaches(t *testing.T) {
+	for _, caches := range [][]string{{"go"}, {"npm", "pip"}, {"go", "npm", "pip"}} {
+		var got struct {
+			Base   string
+			Caches []string
+		}
+		cfg := scaffoldConfig("alpine:3", caches)
+		if _, err := toml.Decode(cfg, &got); err != nil || got.Base != "alpine:3" || !slices.Equal(got.Caches, caches) {
+			t.Errorf("config scaffold for caches %q = %+v, %v", caches, got, err)
+		}
+	}
+	if !strings.Contains(scaffoldConfig("", []string{"go", "npm"}), "\ncaches        = [\"go\", \"npm\"]       # go | npm | pip\n") {
+		t.Errorf("caches line misaligned:\n%s", scaffoldConfig("", []string{"go", "npm"}))
+	}
+}
+
+func TestDetectCaches(t *testing.T) {
+	tests := []struct {
+		files []string
+		want  []string
+	}{
+		{nil, nil},
+		{[]string{"go.mod"}, []string{"go"}},
+		{[]string{"package.json", "go.mod"}, []string{"go", "npm"}},
+		{[]string{"pyproject.toml", "requirements.txt"}, []string{"pip"}},
+		{[]string{"go.work", "package.json", "setup.py"}, []string{"go", "npm", "pip"}},
+		{[]string{"sub/go.mod", "README.md"}, nil},
+	}
+	for _, tt := range tests {
+		root := t.TempDir()
+		for _, f := range tt.files {
+			p := filepath.Join(root, f)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := detectCaches(root); !slices.Equal(got, tt.want) {
+			t.Errorf("detectCaches(%q) = %q, want %q", tt.files, got, tt.want)
+		}
+	}
+	// A directory named like a marker is not one.
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "package.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := detectCaches(root); got != nil {
+		t.Errorf("detectCaches(dir package.json) = %q", got)
 	}
 }

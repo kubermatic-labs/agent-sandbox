@@ -67,7 +67,7 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
 
 ```
 agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS...]   # main entry: ensure image, ensure running, exec
-agent-sandbox init [--base IMAGE]                     # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
+agent-sandbox init [--base IMAGE] [--caches LIST]     # scaffold .agent-sandbox/{config.toml,Containerfile}; auto-trust
 agent-sandbox trust                                   # show diff of .agent-sandbox/ vs last approved snapshot, approve
 agent-sandbox build [--no-cache] [--pull]             # force image build; --pull refreshes base + agent versions
 agent-sandbox status [--all]                          # sandboxes for this project (or all, plus volumes): name, state, uptime, sessions, stale, git mode
@@ -89,8 +89,12 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
   stale when it runs another agent-sandbox binary, or an image whose tag a newer build has taken.
 - `init` writes a fully commented `config.toml` and a `Containerfile` with only `ARG BASE_IMAGE` / `FROM ${BASE_IMAGE}`
   (plus a commented install example in the base's package manager), then records them as trusted; it refuses if
-  `.agent-sandbox/` exists. `--base` (one of the bases in section 3.3) is written to `config.toml` as `base`, the only
-  uncommented key; without it `base` stays commented, so the global config or the default applies.
+  `.agent-sandbox/` exists. `--base` (one of the bases in section 3.3) is written to `config.toml` as `base`; without
+  it `base` stays commented, so the global config or the default applies. `--caches` (comma-separated presets from
+  section 3.5) is written as `caches`. Without it, init detects presets from regular files at the project root only:
+  `go.mod`/`go.work` → `go`, `package.json` → `npm`, `requirements.txt`/`pyproject.toml`/`setup.py`/`setup.cfg`/
+  `Pipfile` → `pip`; `--caches=` writes none. Detection is a plain `stat`, no git. With neither key set, `caches`
+  stays commented. These are the only keys init uncomments.
 - `worktree rm` with `--force` also stops a running sandbox and discards uncommitted changes. If the worktree
   directory is already gone, it runs `git worktree prune`.
 

@@ -77,7 +77,7 @@ enforces an older policy.
 | Command | |
 |---|---|
 | `agent-sandbox [-n NAME [--git MODE]] [--strict] [--gc] [--replace] [-- CMD ARGS...]` | run a session; the exit code is the command's; `--replace` replaces a running sandbox whose config, git mode, image or binary is out of date; `--git ro\|worktree` overrides `git` for this run (requires `-n`, never replaces a sandbox running in another mode) |
-| `agent-sandbox init [--base IMAGE]` | create `.agent-sandbox/{config.toml,Containerfile}` and trust them; `--base` sets `base` in `config.toml` |
+| `agent-sandbox init [--base IMAGE] [--caches LIST]` | create `.agent-sandbox/{config.toml,Containerfile}` and trust them; `--base` sets `base` in `config.toml`; `--caches go,npm` sets `caches` (default: detected from `go.mod`/`go.work`, `package.json`, `requirements.txt`/`pyproject.toml`/`setup.py`/`setup.cfg`/`Pipfile` at the project root; `--caches=` for none) |
 | `agent-sandbox trust` | review `.agent-sandbox/` against the last approved version and approve it |
 | `agent-sandbox build [--no-cache] [--pull]` | rebuild images; `--pull` refreshes image and the agents |
 | `agent-sandbox status [--all]` | this project's sandboxes (`--all`: every project's, plus volumes) |
