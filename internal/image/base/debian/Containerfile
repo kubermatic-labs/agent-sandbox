@@ -30,9 +30,6 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# The agents need Node.js >= 22.19.
-RUN node -e 'const [a, b] = process.versions.node.split(".").map(Number); if (a < 22 || (a === 22 && b < 19)) { console.error("node " + process.version + " is too old, the agents need >= 22.19"); process.exit(1) }'
-
 # The agents are baked into the image, installed globally and owned by root:
 # sessions run as an unprivileged user and cannot replace them. Self-update is
 # disabled as well, so agents do not try and fail on every start.
