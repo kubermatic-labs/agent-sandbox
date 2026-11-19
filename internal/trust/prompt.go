@@ -42,8 +42,10 @@ func (c *Check) Summary() string {
 			if err := toml.NewEncoder(&buf).Encode(map[string]any{k: v}); err != nil {
 				fmt.Fprintf(&b, "  %s = %v\n", k, v)
 			} else {
-				for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-					b.WriteString("  " + line + "\n")
+				for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+					b.WriteString("  ")
+					b.WriteString(line)
+					b.WriteString("\n")
 				}
 			}
 			shown = true
