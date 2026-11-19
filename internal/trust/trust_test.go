@@ -83,6 +83,27 @@ func TestLifecycle(t *testing.T) {
 	}
 }
 
+func TestForget(t *testing.T) {
+	root, data := t.TempDir(), t.TempDir()
+	store := NewStore(data, "p-1")
+	write(t, filepath.Join(root, DirName, "config.toml"), "network = \"open\"\n", 0o644)
+	if err := evaluate(t, root, store).Approve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Forget(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
+		t.Errorf("store dir still exists: %v", err)
+	}
+	if c := evaluate(t, root, store); c.State != Untrusted {
+		t.Errorf("after Forget: %v, want Untrusted", c.State)
+	}
+	if err := NewStore(data, "never-trusted").Forget(); err != nil {
+		t.Errorf("Forget of a missing store: %v", err)
+	}
+}
+
 func TestStagingIsCleanedUp(t *testing.T) {
 	root, data := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(root, DirName, "config.toml"), "", 0o644)

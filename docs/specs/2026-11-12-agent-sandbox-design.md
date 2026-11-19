@@ -41,16 +41,25 @@ Primary target host: Fedora, rootless podman 6.x, SELinux enforcing, ext4/btrfs.
   sandboxes.
 - Sandbox name: `-n/--name NAME`, default `default`.
 - Container name: `asb-<project-id>-<name>`.
-- Container labels (used for lookup and never parsed back from names):
-  - `agent-sandbox=1`
-  - `agent-sandbox.project=<abs root>`
-  - `agent-sandbox.project-id=<id>`
-  - `agent-sandbox.name=<name>`
-  - `agent-sandbox.image-id=<podman image ID the container was started from>`
-  - `agent-sandbox.binary=<sha256 of the agent-sandbox binary>`
-  - `agent-sandbox.git-mode=ro|worktree`
-- Volumes created by agent-sandbox carry `agent-sandbox=1` and `agent-sandbox.project-id=<id>`, so
-  `podman volume ls --filter label=agent-sandbox.project-id=<id>` finds a project's volumes for cleanup.
+- Labels. This table is the only list of them, and `internal/labels` is their only definition in code; everything
+  else refers to these. Objects are found by label and never by parsing names. Keys and values never change: a
+  container, volume or image an older version created would no longer be found or pruned.
+
+  | Label                      | Value                                                   | On                                  |
+  |----------------------------|---------------------------------------------------------|-------------------------------------|
+  | `agent-sandbox`            | `1`                                                     | containers, volumes, images         |
+  | `agent-sandbox.project`    | absolute project root                                   | containers, volumes, project images |
+  | `agent-sandbox.project-id` | project ID                                              | containers, volumes, project images |
+  | `agent-sandbox.name`       | sandbox name                                            | containers                          |
+  | `agent-sandbox.git-mode`   | `ro` or `worktree`                                      | containers                          |
+  | `agent-sandbox.image-id`   | podman image ID the container was started from          | containers                          |
+  | `agent-sandbox.binary`     | sha256 of the agent-sandbox binary that started it      | containers                          |
+  | `agent-sandbox.config`     | hash of the policy the container enforces (section 2.4) | containers                          |
+  | `agent-sandbox.kind`       | `base` or `project` (section 3.3)                       | images                              |
+
+  A sandbox is looked up by `project-id` and `name`. `project-id` finds a project's volumes for cleanup, and
+  `project` lets `prune --orphaned` tell whether the project still exists (section 2.5); volumes from before the
+  `project` label have only the ID. A project image inherits its base's labels and overrides `kind`.
 
 ### 2.2 Paths inside the container
 
@@ -74,6 +83,7 @@ agent-sandbox status [--all]                          # sandboxes for this proje
 agent-sandbox stop [-n NAME | --all]                  # stop now instead of waiting for idle; --all = every sandbox of this project
 agent-sandbox worktree list                           # name, branch, ahead of HEAD, dirty, running
 agent-sandbox worktree rm NAME [--force] [--delete-branch]
+agent-sandbox prune {containers|volumes|images|state|all}... [--orphaned | --all-projects] [--base] [--force] [--dry-run] [-y]
 ```
 
 - Without `-- CMD`, run `command` from the config, or `bash -l` if it is unset. Unknown positional arguments are an
@@ -97,10 +107,12 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
   stays commented. These are the only keys init uncomments.
 - `worktree rm` with `--force` also stops a running sandbox and discards uncommitted changes. If the worktree
   directory is already gone, it runs `git worktree prune`.
+- `prune` without a kind prints its help. See section 2.5.
 
 ### 2.4 Main flow
 
-1. Resolve the project root, project ID and sandbox name.
+1. Resolve the project root, project ID and sandbox name. Take a shared `flock` on
+   `$XDG_RUNTIME_DIR/agent-sandbox/prune.lock`, held until step 6 is done (section 2.5).
 2. Load and merge the config. Check trust (section 3.4); fail if not trusted.
 3. In worktree mode, ensure the worktree exists (section 5).
 4. Compute the image hash and build the base and project images if missing (section 3.3). Builds run under
@@ -110,10 +122,10 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
 6. Find the container by labels:
    - running with a different git mode while the mode comes from `--git`: refuse, even with `--replace`, and ask for
      another `-n NAME`;
-   - running with a different git mode, or a different (or no) `agent-sandbox.config` label: refuse and ask for
-     `podman stop <container>`. The label is a sha256 of the `podman run` argv without the labels and the image, so it
-     covers the network mode, `allow_cidrs`, `allow_domains`, `idle_timeout`, mounts and deny-list overlays,
-     resources and the secrets env file. A sandbox started under an older policy would not enforce the current one;
+   - running with a different git mode, or a different (or no) `agent-sandbox.config` label (section 2.1): refuse and
+     ask for `podman stop <container>`. The label is a sha256 of the `podman run` argv without the labels and the
+     image, so it covers the network mode, `allow_cidrs`, `allow_domains`, `idle_timeout`, mounts and deny-list
+     overlays, resources and the secrets env file. A sandbox started under an older policy would not enforce the current one;
      with `--replace`, stop and remove it instead and continue as if absent (its other sessions end);
    - running with the same image ID and binary hash: use it;
    - running with a different image ID or binary hash: warn
@@ -126,7 +138,46 @@ agent-sandbox worktree rm NAME [--force] [--delete-branch]
 7. Release the lock. `podman exec` the command (section 4.3).
 8. After the exec returns, run the post-session scan (section 7) and exit with the command's exit code.
 
-If the container vanishes between step 6 and the exec (the idle race), retry steps 5–7 exactly once.
+If the container vanishes between step 6 and the exec (the idle race), retry steps 5–7 exactly once, again under a
+shared prune lock.
+
+### 2.5 Prune
+
+`prune` removes what agent-sandbox leaves behind. Kinds, any number of them:
+
+- `containers`: sandbox containers. Stopped ones only; `--force` also stops running ones, ending their sessions.
+- `volumes`: home and cache volumes (section 3.5). Kept while any container of their project remains, so with a
+  running sandbox they need `containers --force` in the same run.
+- `images`: project image tags, and untagged images labelled as that project's. Base images (tagged, and untagged
+  ones labelled `kind=base`, left behind by `build --pull`) only with `--base`, since every project shares them.
+- `state`: the trust record (`trust/<id>/`, so the next run asks again) and the scan findings (`state/<id>/`).
+- `all`: all four.
+
+Scope: this project by default; `--orphaned` selects projects whose root no longer exists (`lstat` says it does not;
+any other error counts as existing, and a root on an unmounted drive counts as gone); `--all-projects` selects every
+project and works outside any project. A project's root comes from the `agent-sandbox.project` label on its
+containers, volumes or project images, and is used only if it hashes to the project ID. `--orphaned` keeps
+everything of a project whose root is not recorded anywhere (from before the volume label) and names those IDs.
+
+Rules:
+
+- Objects are listed by the `agent-sandbox=1` label (section 2.1) or, for image tags, by agent-sandbox's own
+  repositories (`localhost/agent-sandbox-base`, `localhost/asb-<project-id>`), and removed one by one by name or ID. No
+  `podman system prune`, `image prune` or `volume prune`, which would reach other objects.
+- Nothing a container uses is removed: images whose podman container count (minus containers removed in the same
+  run) is non-zero are kept, `volume rm` and `rmi` run without `--force` (`volume rm --force` would also remove the
+  containers using the volume), and podman's refusal is reported as a failure.
+- Worktrees (`worktrees/<id>/`) are never removed, since they may hold uncommitted work; they are listed as kept.
+- The plan is a pure function of the listing (`internal/prune`), so `--dry-run` shows exactly what would go.
+- `prune` lists the plan and asks `[y/N]`; without a terminal it refuses unless `--yes` (or `--dry-run`) is given.
+  Home volumes are marked as holding the agents' state and history.
+- Listing and the question happen without a lock. After confirmation, `prune` takes `prune.lock` exclusively
+  (printing that it waits, if it must), lists and plans again, and removes only what was listed and is still in the
+  plan: a sandbox started meanwhile keeps what it uses. The main flow (steps 1–6), `build`, `trust` and `init` hold
+  the lock shared, so a trust record, image or volume is never removed between its check and its use; in
+  particular `podman run` never auto-creates a pruned volume without the ownership fix.
+- A trust record is removed hash first, so an interrupted removal leaves the project untrusted.
+- Items that fail are reported and the rest continue; the exit code is non-zero if any failed.
 
 ## 3. Configuration, images, trust
 
@@ -244,6 +295,8 @@ tokens (section 11).
 - After a successful build, remove older `localhost/asb-<project-id>:*` tags that no running container uses (podman
   refuses to remove an image a container uses).
 - `build` is gated by trust like the main command; it never builds an unapproved Containerfile.
+- Labels: builds pass the image labels of section 2.1. They let `prune` recognise an image after a newer build took
+  its tag. Labels are not part of the tag hash, so images built before them keep their tags.
 - If there is no project Containerfile, run the base image directly.
 
 Build output is streamed to the terminal. A failed build exits non-zero and never touches a running container.
@@ -302,8 +355,7 @@ between projects: a shared home would let an agent in project A plant `~/.claude
 
   For the seed mount, the wrapper copies the seed dir to a private temp dir first and mounts that copy with `:Z`, so
   the real config dir is never relabeled.
-- Volumes outlive containers. `status --all` lists them per project; removal is plain `podman volume rm` using the
-  labels.
+- Volumes outlive containers. `status --all` lists them per project; `prune volumes` removes them (section 2.5).
 
 ## 4. Runtime
 
@@ -592,6 +644,7 @@ Fail closed, and never fall back to less isolation.
 | worktree mode on a reftable repo            | error explaining why; suggest `ro` mode                                         |
 | container vanished before exec              | one retry of ensure-running + exec under the lock                               |
 | worktree dir/registration mismatch          | error, suggest `git worktree prune`, delete nothing                             |
+| prune: podman refuses a removal (in use)    | report it, remove the rest, exit non-zero                                       |
 | post-session scan finds paths               | loud warning with paths; `--strict` refuses the next start                      |
 
 ## 7. Post-session scan
@@ -628,6 +681,8 @@ internal/config      # TOML load/merge/validate, defaults (incl. allow_domains)
 internal/trust       # hash, snapshot, diff, prompt
 internal/image       # base (go:embed Containerfile per base) + project build, hashing, pruning
 internal/podman      # thin CLI wrapper, --format json; no podman Go bindings
+internal/labels      # the podman labels on containers, volumes and images (section 2.1)
+internal/prune       # prune plan from a listing (pure)
 internal/mounts      # mount plan per git mode and deny-list (security-critical, pure functions)
 internal/worktree    # git worktree add/list/rm, worktree_copy
 internal/sandbox     # ensure-running, flock, exec, ready wait, stale detection
@@ -655,7 +710,9 @@ internal/hostgit     # hardened host git runner, .git/config parser (hooksPath, 
   selection from a `resolv.conf` with both link-local and LAN nameservers;
 - proxy host matching (exact, wildcard, IP literal, CONNECT parsing, plain HTTP);
 - idle detection against a fake `/proc` tree;
-- post-session scan against a fake tree: nested `.git`, missing top-level `.git`, new deny-list paths, symlink loops.
+- post-session scan against a fake tree: nested `.git`, missing top-level `.git`, new deny-list paths, symlink loops;
+- prune plans: scopes, running containers, volumes held by containers, images in use, base images only with
+  `--base`, foreign images, unknown roots, worktrees kept; replanning after confirmation.
 
 **Integration tests** (`//go:build integration`, real rootless podman, run with `go test -tags integration ./test/...`):
 each escape attempt must fail.
@@ -674,7 +731,9 @@ each escape attempt must fail.
 - an `_init` failure leaves logs that the wrapper prints;
 - `sudo` and setuid binaries do not raise privileges;
 - the idle timeout removes the container; 5 parallel invocations produce exactly one container;
-- a nested `.git` and a new `.envrc` created in a session are reported after the session ends.
+- a nested `.git` and a new `.envrc` created in a session are reported after the session ends;
+- `prune` keeps a running sandbox, its volumes and its image unless forced, never removes an unlabelled volume
+  named like the project's, and `--orphaned --dry-run` lists a deleted project but not a live one.
 
 ## 10. Suggested implementation order
 

@@ -17,9 +17,9 @@ import (
 	"k8c.io/agent-sandbox/internal/config"
 	"k8c.io/agent-sandbox/internal/hostgit"
 	"k8c.io/agent-sandbox/internal/image"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
-	"k8c.io/agent-sandbox/internal/sandbox"
 	"k8c.io/agent-sandbox/internal/selfbin"
 	"k8c.io/agent-sandbox/internal/trust"
 	"k8c.io/agent-sandbox/internal/worktree"
@@ -43,9 +43,9 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 	if err := e.prepare(ctx); err != nil {
 		return err
 	}
-	filter := map[string]string{"agent-sandbox": "1"}
+	filter := labels.Owned()
 	if !all {
-		filter["agent-sandbox.project-id"] = e.proj.ID
+		filter[labels.ProjectID] = e.proj.ID
 	}
 	cs, err := e.pm.ListContainers(ctx, filter)
 	if err != nil {
@@ -56,8 +56,8 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 		binHash, _ = selfbin.Hash(exe)
 	}
 	slices.SortFunc(cs, func(a, b podman.Container) int {
-		return strings.Compare(a.Labels["agent-sandbox.project"]+a.Labels["agent-sandbox.name"],
-			b.Labels["agent-sandbox.project"]+b.Labels["agent-sandbox.name"])
+		return strings.Compare(a.Labels[labels.Project]+a.Labels[labels.Name],
+			b.Labels[labels.Project]+b.Labels[labels.Name])
 	})
 
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
@@ -78,8 +78,8 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 				stale = "yes"
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				c.Labels["agent-sandbox.name"], shortID(c.ID), c.State, uptime, sessions, stale,
-				c.Labels["agent-sandbox.git-mode"], c.Labels["agent-sandbox.project"])
+				c.Labels[labels.Name], shortID(c.ID), c.State, uptime, sessions, stale,
+				c.Labels[labels.GitMode], c.Labels[labels.Project])
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -89,13 +89,13 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 		return nil
 	}
 
-	vs, err := e.pm.ListVolumes(ctx, map[string]string{"agent-sandbox": "1"})
+	vs, err := e.pm.ListVolumes(ctx, labels.Owned())
 	if err != nil {
 		return err
 	}
 	byProject := map[string][]string{}
 	for _, v := range vs {
-		id := v.Labels["agent-sandbox.project-id"]
+		id := v.Labels[labels.ProjectID]
 		byProject[id] = append(byProject[id], v.Name)
 	}
 	if len(byProject) == 0 {
@@ -114,17 +114,17 @@ func Status(ctx context.Context, all bool, out io.Writer) error {
 		slices.Sort(names)
 		fmt.Fprintf(tw, "%s\t%s\n", id, strings.Join(names, " "))
 	}
-	fmt.Fprintln(tw, "\t(remove with: podman volume rm $(podman volume ls -q --filter label=agent-sandbox.project-id=ID))")
+	fmt.Fprintln(tw, "\t(remove with: agent-sandbox prune volumes, in the project; --orphaned for deleted projects)")
 	return tw.Flush()
 }
 
 // isStale reports whether a sandbox runs an older binary, or an image whose
 // tag a newer build has taken over.
 func (e *env) isStale(ctx context.Context, c podman.Container, binHash string) bool {
-	if binHash != "" && c.Labels["agent-sandbox.binary"] != binHash {
+	if binHash != "" && c.Labels[labels.Binary] != binHash {
 		return true
 	}
-	tags, err := e.pm.ImageTags(ctx, c.Labels["agent-sandbox.image-id"])
+	tags, err := e.pm.ImageTags(ctx, c.Labels[labels.ImageID])
 	return err != nil || len(tags) == 0
 }
 
@@ -162,12 +162,12 @@ func Stop(ctx context.Context, name string, all bool, out io.Writer) error {
 	if err := e.prepare(ctx); err != nil {
 		return err
 	}
-	filter := map[string]string{"agent-sandbox.project-id": e.proj.ID}
+	filter := map[string]string{labels.ProjectID: e.proj.ID}
 	if !all {
 		if err := project.ValidateName(name); err != nil {
 			return err
 		}
-		filter = sandbox.Lookup(e.proj.ID, name)
+		filter = labels.Lookup(e.proj.ID, name)
 	}
 	cs, err := e.pm.ListContainers(ctx, filter)
 	if err != nil {
@@ -181,7 +181,7 @@ func Stop(ctx context.Context, name string, all bool, out io.Writer) error {
 		if err := e.stopContainer(ctx, c); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "stopped %s\n", c.Labels["agent-sandbox.name"])
+		fmt.Fprintf(out, "stopped %s\n", c.Labels[labels.Name])
 	}
 	return nil
 }
@@ -230,7 +230,7 @@ func WorktreeList(ctx context.Context, out io.Writer) error {
 			dirty = yesNo(d)
 		}
 		running := "no"
-		if cs, err := e.pm.ListContainers(ctx, sandbox.Lookup(e.proj.ID, name)); err == nil {
+		if cs, err := e.pm.ListContainers(ctx, labels.Lookup(e.proj.ID, name)); err == nil {
 			for _, c := range cs {
 				if c.State == "running" {
 					running = "yes"
@@ -273,7 +273,7 @@ func WorktreeRm(ctx context.Context, name string, force, deleteBranch bool, out 
 	if err := e.prepare(ctx); err != nil {
 		return err
 	}
-	cs, err := e.pm.ListContainers(ctx, sandbox.Lookup(e.proj.ID, name))
+	cs, err := e.pm.ListContainers(ctx, labels.Lookup(e.proj.ID, name))
 	if err != nil {
 		return err
 	}
@@ -380,6 +380,11 @@ func Init(_ context.Context, o InitOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	release, err := e.holdPruneLock()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if o.DetectCaches {
 		caches = detectCaches(e.proj.Root)
 	}

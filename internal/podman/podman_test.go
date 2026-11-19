@@ -97,7 +97,7 @@ func TestClientCommands(t *testing.T) {
 		case "version":
 			return podmantest.Result{Out: "6.1.3\n"}
 		case "ps":
-			return podmantest.Result{Out: `[{"Id":"abc","Names":["asb-x-default"],"State":"exited","ExitCode":2,"Labels":{"agent-sandbox":"1"}}]`}
+			return podmantest.Result{Out: `[{"Id":"abc","Names":["asb-x-default"],"State":"exited","ExitCode":2,"Labels":{"k":"v"}}]`}
 		case "image":
 			return podmantest.Result{Out: "feedface\n"}
 		}
@@ -116,7 +116,7 @@ func TestClientCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []podman.Container{{ID: "abc", Names: []string{"asb-x-default"}, State: "exited", ExitCode: 2, Labels: map[string]string{"agent-sandbox": "1"}}}
+	want := []podman.Container{{ID: "abc", Names: []string{"asb-x-default"}, State: "exited", ExitCode: 2, Labels: map[string]string{"k": "v"}}}
 	if diff := cmp.Diff(want, cs); diff != "" {
 		t.Errorf("ListContainers (-want +got):\n%s", diff)
 	}
@@ -161,7 +161,7 @@ func TestManagementCommands(t *testing.T) {
 		case "top":
 			return podmantest.Result{Out: "PID         USER\n1           nobody\n7           65533\n12          kron\n"}
 		case "volume":
-			return podmantest.Result{Out: `[{"Name":"asb-p-1-home","Labels":{"agent-sandbox.project-id":"p-1"}}]`}
+			return podmantest.Result{Out: `[{"Name":"asb-p-1-home","Labels":{"id":"p-1"}}]`}
 		case "image":
 			return podmantest.Result{Out: "localhost/asb-p-1:abc localhost/x:y \n"}
 		}
@@ -176,8 +176,8 @@ func TestManagementCommands(t *testing.T) {
 	if diff := cmp.Diff([]podman.Process{{PID: "1", User: "nobody"}, {PID: "7", User: "65533"}, {PID: "12", User: "kron"}}, ps); diff != "" {
 		t.Errorf("Top (-want +got):\n%s", diff)
 	}
-	vs, err := c.ListVolumes(ctx, map[string]string{"agent-sandbox": "1"})
-	if err != nil || len(vs) != 1 || vs[0].Labels["agent-sandbox.project-id"] != "p-1" {
+	vs, err := c.ListVolumes(ctx, map[string]string{"k": "v"})
+	if err != nil || len(vs) != 1 || vs[0].Labels["id"] != "p-1" {
 		t.Errorf("ListVolumes = %+v, %v", vs, err)
 	}
 	tags, err := c.ImageTags(ctx, "abc")
@@ -189,5 +189,42 @@ func TestManagementCommands(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{"stop", "--ignore", "--time", "10", "c"}, f.CallsWith("stop")[0]); diff != "" {
 		t.Errorf("stop argv (-want +got):\n%s", diff)
+	}
+}
+
+func TestPruneCommands(t *testing.T) {
+	f := &podmantest.Fake{Handler: func(args []string) podmantest.Result {
+		if args[0] == "images" {
+			return podmantest.Result{Out: `[{"Id":"abc","RepoTags":["localhost/asb-p-1:x"],"Labels":{"k":"v"},"Containers":2,"Size":5},
+				{"Id":"def","RepoTags":null,"Dangling":true}]`}
+		}
+		return podmantest.Result{}
+	}}
+	c := podman.Client{R: f}
+	ctx := context.Background()
+	is, err := c.ListImages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []podman.Image{
+		{ID: "abc", RepoTags: []string{"localhost/asb-p-1:x"}, Labels: map[string]string{"k": "v"}, Containers: 2},
+		{ID: "def", Dangling: true},
+	}
+	if diff := cmp.Diff(want, is); diff != "" {
+		t.Errorf("ListImages (-want +got):\n%s", diff)
+	}
+	if err := c.ImageRemove(ctx, "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.VolumeRemoveUnused(ctx, "vol"); err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := [][]string{
+		{"images", "--format", "json"},
+		{"rmi", "abc"},          // no --force: refused while a container uses it
+		{"volume", "rm", "vol"}, // no --force: that removes the containers using it
+	}
+	if diff := cmp.Diff(wantCalls, f.Calls()); diff != "" {
+		t.Errorf("calls (-want +got):\n%s", diff)
 	}
 }

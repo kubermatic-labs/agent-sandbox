@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/podman/podmantest"
 )
@@ -65,8 +66,11 @@ func TestProjectTag(t *testing.T) {
 }
 
 func TestProjectBuildArgs(t *testing.T) {
-	in := ProjectInput{ContextDir: "/s", BaseTag: "localhost/agent-sandbox-base:abc"}
-	want := []string{"build", "--tag", "t", "--file", "/s/Containerfile", "--build-arg", "BASE_IMAGE=localhost/agent-sandbox-base:abc", "/s"}
+	in := ProjectInput{ProjectID: "p-1", ProjectRoot: "/src/p", ContextDir: "/s", BaseTag: "localhost/agent-sandbox-base:abc"}
+	want := []string{
+		"build", "--tag", "t", "--file", "/s/Containerfile", "--build-arg", "BASE_IMAGE=localhost/agent-sandbox-base:abc",
+	}
+	want = append(append(want, labels.Args(labels.ProjectImage("/src/p", "p-1"))...), "/s")
 	if diff := cmp.Diff(want, ProjectBuildArgs("t", in, BuildOptions{})); diff != "" {
 		t.Errorf("(-want +got):\n%s", diff)
 	}

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/term"
 
 	"k8c.io/agent-sandbox/internal/config"
+	"k8c.io/agent-sandbox/internal/flock"
 	"k8c.io/agent-sandbox/internal/fspath"
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/paths"
@@ -59,6 +61,17 @@ func (e *env) prepare(ctx context.Context) error {
 		return err
 	}
 	return os.MkdirAll(e.paths.RuntimeDir, 0o700)
+}
+
+// holdPruneLock takes the prune lock shared, so prune waits until this
+// command has stopped creating or reading what prune removes. The returned
+// func releases it and may be called more than once.
+func (e *env) holdPruneLock() (func(), error) {
+	unlock, err := flock.LockShared(e.paths.PruneLock())
+	if err != nil {
+		return nil, err
+	}
+	return sync.OnceFunc(unlock), nil
 }
 
 func (e *env) trustStore() trust.Store {
@@ -156,6 +169,7 @@ func (e *env) ensureImages(ctx context.Context, state trust.State, base string, 
 	}
 	im.tag, err = image.EnsureProject(ctx, e.pm, image.ProjectInput{
 		ProjectID:   e.proj.ID,
+		ProjectRoot: e.proj.Root,
 		ContextDir:  snap,
 		BaseTag:     im.base,
 		BaseImageID: baseID,

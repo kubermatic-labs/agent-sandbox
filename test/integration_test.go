@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/project"
 )
 
@@ -76,8 +77,18 @@ func newProject(t *testing.T, globalConfig string) *sandboxEnv {
 	return e
 }
 
+// labelFilter returns a podman --filter value matching a label.
+func labelFilter(key, value string) string {
+	return "label=" + key + "=" + value
+}
+
+// projectFilter matches everything of this test's project.
+func (e *sandboxEnv) projectFilter() string {
+	return labelFilter(labels.ProjectID, e.id)
+}
+
 func (e *sandboxEnv) cleanup() {
-	filter := "label=agent-sandbox.project-id=" + e.id
+	filter := e.projectFilter()
 	out, _ := exec.Command("podman", "ps", "-aq", "--filter", filter).Output()
 	for _, id := range strings.Fields(string(out)) {
 		_ = exec.Command("podman", "rm", "-f", "-t", "0", id).Run()
@@ -236,7 +247,7 @@ func TestParallelInvocationsShareOneContainer(t *testing.T) {
 			t.Errorf("invocation %d: exit %d: %s", i, r.code, r.stderr)
 		}
 	}
-	out, err := exec.Command("podman", "ps", "-aq", "--filter", "label=agent-sandbox.project-id="+e.id).Output()
+	out, err := exec.Command("podman", "ps", "-aq", "--filter", e.projectFilter()).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +260,7 @@ func TestNamedSandboxesAreSeparate(t *testing.T) {
 	e := newProject(t, openNetwork)
 	e.mustRun(e.root, "", "--", "true")
 	e.mustRun(e.root, "", "-n", "other", "--", "true")
-	out, err := exec.Command("podman", "ps", "-a", "--format", "{{.Names}}", "--filter", "label=agent-sandbox.project-id="+e.id).Output()
+	out, err := exec.Command("podman", "ps", "-a", "--format", "{{.Names}}", "--filter", e.projectFilter()).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +282,7 @@ func TestCacheVolumesWritable(t *testing.T) {
 func (e *sandboxEnv) container() (id, state string) {
 	e.t.Helper()
 	out, err := exec.Command("podman", "ps", "-a", "--format", "{{.ID}} {{.State}}",
-		"--filter", "label=agent-sandbox.project-id="+e.id, "--filter", "label=agent-sandbox.name=default").Output()
+		"--filter", e.projectFilter(), "--filter", labelFilter(labels.Name, "default")).Output()
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -324,7 +335,7 @@ func TestIdleTimeoutStopsContainer(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
-	out, _ := exec.Command("podman", "ps", "-a", "--format", "{{.ExitCode}}", "--filter", "label=agent-sandbox.project-id="+e.id).Output()
+	out, _ := exec.Command("podman", "ps", "-a", "--format", "{{.ExitCode}}", "--filter", e.projectFilter()).Output()
 	if strings.TrimSpace(string(out)) != "0" {
 		t.Errorf("idle exit code = %q, want 0", out)
 	}

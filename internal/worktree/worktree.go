@@ -26,9 +26,13 @@ type Worktree struct {
 	Created        bool   // created by this call
 }
 
+// ProjectsDir holds one directory of worktrees per project, named by
+// project ID.
+func ProjectsDir(dataDir string) string { return filepath.Join(dataDir, "worktrees") }
+
 // Path returns where a sandbox's worktree lives.
 func Path(dataDir, projectID, name string) string {
-	return filepath.Join(dataDir, "worktrees", projectID, name)
+	return filepath.Join(ProjectsDir(dataDir), projectID, name)
 }
 
 // Branch returns the branch a sandbox works on.

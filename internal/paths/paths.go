@@ -65,3 +65,7 @@ func (p Paths) BaseOverrideDir() string { return filepath.Join(p.ConfigDir, "bas
 
 // HomeSeedDir is the optional seed copied into new home volumes.
 func (p Paths) HomeSeedDir() string { return filepath.Join(p.ConfigDir, "home") }
+
+// PruneLock is held exclusively by prune and shared by every command that
+// creates or reads what prune removes: trust records, images, volumes.
+func (p Paths) PruneLock() string { return filepath.Join(p.RuntimeDir, "prune.lock") }

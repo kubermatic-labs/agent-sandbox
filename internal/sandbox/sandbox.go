@@ -13,6 +13,7 @@ import (
 
 	"k8c.io/agent-sandbox/internal/flock"
 	"k8c.io/agent-sandbox/internal/initd"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
 )
@@ -27,6 +28,9 @@ type Sandbox struct {
 	Lookup    map[string]string // labels identifying this sandbox
 	RunArgv   []string          // podman run argv (RunArgs)
 	LockDir   string            // holds <container>.lock
+	// PruneLock, if set, is held shared while the container is ensured, so
+	// prune cannot remove a volume or image between its check and podman run.
+	PruneLock string
 
 	Volumes      []mounts.Volume
 	VolumeLabels map[string]string
@@ -49,12 +53,25 @@ type Sandbox struct {
 	// one-off mode must not take over a sandbox (spec 2.4).
 	GitOverride bool
 	// ConfigHash (ConfigHash of the run input) must match the running
-	// container's ConfigLabel: otherwise it enforces an older policy.
+	// container's Config label: otherwise it enforces an older policy.
 	ConfigHash string
 	// Replace stops and removes a running container that does not match
 	// (git mode, config, image or binary) instead of refusing or warning,
 	// and starts a new one. Sessions still in the old one are killed.
 	Replace bool
+
+	ensured bool // Ensure ran; Exec does not repeat it
+}
+
+// Ensure makes sure the container runs. Exec does this itself; callers that
+// hold locks while preparing images call Ensure first, so they can release
+// them before the session, which may run for hours.
+func (s *Sandbox) Ensure(ctx context.Context) error {
+	if err := s.ensureLocked(ctx); err != nil {
+		return err
+	}
+	s.ensured = true
+	return nil
 }
 
 // Exec ensures the container runs and execs execArgv (ExecArgs) in it,
@@ -62,8 +79,10 @@ type Sandbox struct {
 // check and the exec (it went idle), it is started again and the exec
 // retried exactly once (spec 2.4).
 func (s *Sandbox) Exec(ctx context.Context, execArgv []string) (int, error) {
-	if err := s.ensureLocked(ctx); err != nil {
-		return 1, err
+	if !s.ensured {
+		if err := s.ensureLocked(ctx); err != nil {
+			return 1, err
+		}
 	}
 	code, err := s.Podman.R.Stream(ctx, s.Stdio, execArgv...)
 	if err != nil || code != 125 {
@@ -82,6 +101,13 @@ func (s *Sandbox) Exec(ctx context.Context, execArgv []string) (int, error) {
 }
 
 func (s *Sandbox) ensureLocked(ctx context.Context) error {
+	if s.PruneLock != "" {
+		unlockPrune, err := flock.LockShared(s.PruneLock)
+		if err != nil {
+			return err
+		}
+		defer unlockPrune()
+	}
 	unlock, err := flock.Lock(filepath.Join(s.LockDir, s.Container+".lock"))
 	if err != nil {
 		return err
@@ -101,7 +127,7 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 			continue
 		}
 		var reason string
-		switch mode := c.Labels["agent-sandbox.git-mode"]; {
+		switch mode := c.Labels[labels.GitMode]; {
 		case s.GitMode != "" && mode != s.GitMode:
 			if s.GitOverride {
 				return fmt.Errorf("sandbox %s is running in git mode %q, not %q; use another -n NAME for --git %s", s.Container, mode, s.GitMode, s.GitMode)
@@ -110,7 +136,7 @@ func (s *Sandbox) ensure(ctx context.Context) error {
 				return fmt.Errorf("the running sandbox uses git mode %q but the config now says %q; 'podman stop %s' first, or use --replace", mode, s.GitMode, s.Container)
 			}
 			reason = "it uses another git mode"
-		case s.ConfigHash != "" && c.Labels[ConfigLabel] != s.ConfigHash:
+		case s.ConfigHash != "" && c.Labels[labels.Config] != s.ConfigHash:
 			if !s.Replace {
 				return fmt.Errorf("the running sandbox was started with a different configuration (network, mounts, readonly, resources, ...) and would not enforce the current one; 'podman stop %s' first, or use --replace", s.Container)
 			}
@@ -212,8 +238,8 @@ func (s *Sandbox) failStart(ctx context.Context, msg string) error {
 // stale reports whether the running sandbox was started from an older image
 // or binary.
 func (s *Sandbox) stale(c podman.Container) bool {
-	return (s.ImageID != "" && c.Labels["agent-sandbox.image-id"] != s.ImageID) ||
-		(s.BinaryHash != "" && c.Labels["agent-sandbox.binary"] != s.BinaryHash)
+	return (s.ImageID != "" && c.Labels[labels.ImageID] != s.ImageID) ||
+		(s.BinaryHash != "" && c.Labels[labels.Binary] != s.BinaryHash)
 }
 
 func (s *Sandbox) running(ctx context.Context) (bool, error) {

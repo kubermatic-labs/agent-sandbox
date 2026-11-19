@@ -84,6 +84,7 @@ enforces an older policy.
 | `agent-sandbox stop [-n NAME \| --all]` | stop a sandbox of this project now (`--all`: all of this project's) |
 | `agent-sandbox worktree list` | worktree-mode worktrees: branch, commits ahead, dirty, running |
 | `agent-sandbox worktree rm NAME [--force] [--delete-branch]` | remove a worktree (the branch stays by default) |
+| `agent-sandbox prune KIND... [--orphaned \| --all-projects] [--base] [--force] [--dry-run] [-y]` | remove this project's `containers`, `volumes`, `images`, `state` or `all`; see [Cleaning up](#cleaning-up) |
 
 Inside the sandbox the project is at the same path as on the host, the working directory follows yours, and `$HOME`
 is the project's own home volume.
@@ -176,6 +177,31 @@ agent-sandbox scans the project for nested `.git` directories (their config and 
 and for protected files the agent created, prints a warning, and records the findings in
 `~/.local/share/agent-sandbox/state/<project>/findings`. Inspect or delete the paths; delete the findings file once
 reviewed. With `--strict` or `strict = true`, agent-sandbox refuses to start while findings remain.
+
+## Cleaning up
+
+Sandboxes stop themselves when idle, but their volumes, images and state stay until you remove them:
+
+```sh
+agent-sandbox prune all --dry-run          # what this project would lose
+agent-sandbox prune all --force            # everything of this project, stopping its running sandboxes
+agent-sandbox prune all --orphaned         # everything of projects whose directory is gone
+agent-sandbox prune images --all-projects --base   # every image, including the shared base images
+```
+
+| Kind | What |
+|---|---|
+| `containers` | sandbox containers; running ones only with `--force`, which ends their sessions |
+| `volumes` | the home volume (agent settings, sessions and history) and cache volumes; kept while a sandbox of the project exists |
+| `images` | project images; base images, shared by all projects, only with `--base` |
+| `state` | the trust approval (you are asked again) and the post-session scan findings |
+| `all` | all of the above |
+
+`prune` lists what it will remove and asks first; without a terminal it needs `--yes`. It never removes anything a
+container still uses, anything without agent-sandbox's labels, or worktrees (use `worktree rm`). `--orphaned` judges a
+project by whether its directory exists, so a project on an unmounted drive counts as deleted; check the list.
+Volumes created by agent-sandbox versions before `prune` do not record their project's directory: `--orphaned`
+names their project IDs and keeps them, and `--all-projects` removes them.
 
 ## Residual risks
 

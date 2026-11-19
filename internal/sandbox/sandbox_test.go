@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,9 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"k8c.io/agent-sandbox/internal/flock"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/podman/podmantest"
+	"k8c.io/agent-sandbox/internal/project"
 )
 
 // world is a minimal stateful podman: one container, some volumes.
@@ -28,7 +32,7 @@ type world struct {
 	initFails  bool
 	readyAfter int  // ready probes that fail before the ready file appears
 	dieOnStart bool // _init fails: the container exits before ready
-	labels     string
+	labels     map[string]string
 }
 
 func (w *world) handle(args []string) podmantest.Result {
@@ -39,11 +43,11 @@ func (w *world) handle(args []string) podmantest.Result {
 		if w.state == "" {
 			return podmantest.Result{Out: "[]"}
 		}
-		labels := w.labels
-		if labels == "" {
-			labels = "{}"
+		l, err := json.Marshal(w.labels)
+		if err != nil || w.labels == nil {
+			l = []byte("{}")
 		}
-		return podmantest.Result{Out: fmt.Sprintf(`[{"Id":"c1","State":%q,"ExitCode":%d,"Labels":%s}]`, w.state, w.exitCode, labels)}
+		return podmantest.Result{Out: fmt.Sprintf(`[{"Id":"c1","State":%q,"ExitCode":%d,"Labels":%s}]`, w.state, w.exitCode, l)}
 	case args[0] == "volume" && args[1] == "exists":
 		if w.volumes[args[2]] {
 			return podmantest.Result{}
@@ -108,11 +112,11 @@ func newSandbox(t *testing.T, w *world) (*Sandbox, *podmantest.Fake, *bytes.Buff
 		Podman:       podman.Client{R: f},
 		Log:          log,
 		Container:    "asb-x-default",
-		Lookup:       Lookup("x", "default"),
+		Lookup:       labels.Lookup("x", "default"),
 		RunArgv:      []string{"run", "-d", "--name", "asb-x-default", "img", "sleep", "infinity"},
 		LockDir:      t.TempDir(),
 		Volumes:      []mounts.Volume{{Name: "asb-x-home", Home: true}, {Name: "asb-x-go-mod"}},
-		VolumeLabels: VolumeLabels("x"),
+		VolumeLabels: labels.Volume(project.Project{Root: "/src/x", ID: "x"}),
 		VolumeImage:  "img",
 		UID:          1000,
 		GID:          1000,
@@ -196,6 +200,54 @@ func TestExecRetriesOnceWhenContainerVanished(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "starting it again") {
 		t.Errorf("log = %q", log.String())
+	}
+}
+
+func TestEnsureThenExecChecksOnce(t *testing.T) {
+	w := &world{}
+	s, f, _ := newSandbox(t, w)
+	ctx := context.Background()
+	if err := s.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Exec(ctx, execArgv); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.CallsWith("ps")); n != 1 {
+		t.Errorf("ps calls = %d, want 1: Exec must not ensure again after Ensure", n)
+	}
+	if n := len(f.CallsWith("run", "-d")); n != 1 {
+		t.Errorf("podman run calls = %d, want 1", n)
+	}
+}
+
+// Prune holds the prune lock exclusively; starting a sandbox waits for it.
+func TestEnsureWaitsForPrune(t *testing.T) {
+	w := &world{}
+	s, f, _ := newSandbox(t, w)
+	s.PruneLock = filepath.Join(t.TempDir(), "prune.lock")
+	unlock, err := flock.Lock(s.PruneLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Ensure(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Ensure returned while prune held the lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if n := len(f.Calls()); n != 0 {
+		t.Errorf("podman called %d times while prune held the lock", n)
+	}
+	unlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ensure did not proceed after prune released the lock")
 	}
 }
 
@@ -307,13 +359,13 @@ func TestReadyTimeout(t *testing.T) {
 
 func TestStaleWarning(t *testing.T) {
 	for name, tt := range map[string]struct {
-		labels string
+		labels map[string]string
 		stale  bool
 	}{
-		"current":    {`{"agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, false},
-		"old image":  {`{"agent-sandbox.image-id":"img0","agent-sandbox.binary":"bin1"}`, true},
-		"old binary": {`{"agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin0"}`, true},
-		"no labels":  {`{}`, true},
+		"current":    {map[string]string{labels.ImageID: "img1", labels.Binary: "bin1"}, false},
+		"old image":  {map[string]string{labels.ImageID: "img0", labels.Binary: "bin1"}, true},
+		"old binary": {map[string]string{labels.ImageID: "img1", labels.Binary: "bin0"}, true},
+		"no labels":  {nil, true},
 	} {
 		w := &world{state: "running", labels: tt.labels}
 		s, f, log := newSandbox(t, w)
@@ -331,7 +383,7 @@ func TestStaleWarning(t *testing.T) {
 }
 
 func TestGitModeMismatchRefused(t *testing.T) {
-	w := &world{state: "running", labels: `{"agent-sandbox.git-mode":"ro"}`}
+	w := &world{state: "running", labels: map[string]string{labels.GitMode: "ro"}}
 	s, f, _ := newSandbox(t, w)
 	s.GitMode = "worktree"
 	if _, err := s.Exec(context.Background(), execArgv); err == nil || !strings.Contains(err.Error(), "git mode") {
@@ -343,7 +395,7 @@ func TestGitModeMismatchRefused(t *testing.T) {
 }
 
 func TestGitOverrideNeverReplaces(t *testing.T) {
-	w := &world{state: "running", labels: `{"agent-sandbox.git-mode":"ro"}`}
+	w := &world{state: "running", labels: map[string]string{labels.GitMode: "ro"}}
 	s, f, _ := newSandbox(t, w)
 	s.GitMode, s.GitOverride, s.Replace = "worktree", true, true
 	if _, err := s.Exec(context.Background(), execArgv); err == nil || !strings.Contains(err.Error(), "another -n NAME") {
@@ -356,12 +408,12 @@ func TestGitOverrideNeverReplaces(t *testing.T) {
 
 func TestConfigMismatchRefused(t *testing.T) {
 	for name, tt := range map[string]struct {
-		labels string
+		labels map[string]string
 		ok     bool
 	}{
-		"same config":      {`{"agent-sandbox.config":"h1"}`, true},
-		"different config": {`{"agent-sandbox.config":"h0"}`, false},
-		"no label":         {`{}`, false},
+		"same config":      {map[string]string{labels.Config: "h1"}, true},
+		"different config": {map[string]string{labels.Config: "h0"}, false},
+		"no label":         {nil, false},
 	} {
 		w := &world{state: "running", labels: tt.labels}
 		s, f, _ := newSandbox(t, w)
@@ -383,15 +435,15 @@ func TestConfigMismatchRefused(t *testing.T) {
 
 func TestReplaceMismatch(t *testing.T) {
 	for name, tt := range map[string]struct {
-		labels  string
+		labels  map[string]string
 		replace bool
 	}{
-		"current":          {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, false},
-		"different config": {`{"agent-sandbox.config":"h0","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
-		"no config label":  {`{"agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
-		"other git mode":   {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"worktree","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin1"}`, true},
-		"old image":        {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img0","agent-sandbox.binary":"bin1"}`, true},
-		"old binary":       {`{"agent-sandbox.config":"h1","agent-sandbox.git-mode":"ro","agent-sandbox.image-id":"img1","agent-sandbox.binary":"bin0"}`, true},
+		"current":          {map[string]string{labels.Config: "h1", labels.GitMode: "ro", labels.ImageID: "img1", labels.Binary: "bin1"}, false},
+		"different config": {map[string]string{labels.Config: "h0", labels.GitMode: "ro", labels.ImageID: "img1", labels.Binary: "bin1"}, true},
+		"no config label":  {map[string]string{labels.GitMode: "ro", labels.ImageID: "img1", labels.Binary: "bin1"}, true},
+		"other git mode":   {map[string]string{labels.Config: "h1", labels.GitMode: "worktree", labels.ImageID: "img1", labels.Binary: "bin1"}, true},
+		"old image":        {map[string]string{labels.Config: "h1", labels.GitMode: "ro", labels.ImageID: "img0", labels.Binary: "bin1"}, true},
+		"old binary":       {map[string]string{labels.Config: "h1", labels.GitMode: "ro", labels.ImageID: "img1", labels.Binary: "bin0"}, true},
 	} {
 		w := &world{state: "running", labels: tt.labels}
 		s, f, log := newSandbox(t, w)

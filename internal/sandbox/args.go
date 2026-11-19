@@ -13,32 +13,9 @@ import (
 	"strings"
 
 	"k8c.io/agent-sandbox/internal/config"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/mounts"
-	"k8c.io/agent-sandbox/internal/project"
 )
-
-// Labels returns the container labels (spec 2.1).
-func Labels(p project.Project, name, gitMode, imageID, binaryHash string) map[string]string {
-	return map[string]string{
-		"agent-sandbox":            "1",
-		"agent-sandbox.project":    p.Root,
-		"agent-sandbox.project-id": p.ID,
-		"agent-sandbox.name":       name,
-		"agent-sandbox.image-id":   imageID,
-		"agent-sandbox.binary":     binaryHash,
-		"agent-sandbox.git-mode":   gitMode,
-	}
-}
-
-// Lookup returns the label filter that identifies one sandbox.
-func Lookup(projectID, name string) map[string]string {
-	return map[string]string{"agent-sandbox.project-id": projectID, "agent-sandbox.name": name}
-}
-
-// VolumeLabels returns the labels for a project's volumes.
-func VolumeLabels(projectID string) map[string]string {
-	return map[string]string{"agent-sandbox": "1", "agent-sandbox.project-id": projectID}
-}
 
 // RunInput is everything podman run needs.
 type RunInput struct {
@@ -51,9 +28,6 @@ type RunInput struct {
 	Image     string
 	Command   []string // PID 1
 }
-
-// ConfigLabel records ConfigHash on the container.
-const ConfigLabel = "agent-sandbox.config"
 
 // hostAddrFlag passes a host address to _init. It is left out of ConfigHash:
 // host addresses change all the time (temporary IPv6 addresses, another
@@ -83,19 +57,17 @@ func ConfigHash(in RunInput) string {
 // There is deliberately no --rm: the wrapper removes exited containers
 // itself after printing their logs.
 func RunArgs(in RunInput) []string {
-	labels := maps.Clone(in.Labels)
-	if labels == nil {
-		labels = map[string]string{}
+	l := maps.Clone(in.Labels)
+	if l == nil {
+		l = map[string]string{}
 	}
-	labels[ConfigLabel] = ConfigHash(in)
-	return runArgs(in, labels)
+	l[labels.Config] = ConfigHash(in)
+	return runArgs(in, l)
 }
 
-func runArgs(in RunInput, labels map[string]string) []string {
+func runArgs(in RunInput, l map[string]string) []string {
 	args := []string{"run", "-d", "--name", in.Container}
-	for _, k := range slices.Sorted(maps.Keys(labels)) {
-		args = append(args, "--label", k+"="+labels[k])
-	}
+	args = append(args, labels.Args(l)...)
 	args = append(args,
 		"--userns=keep-id", "--user", "0:0",
 		"--cap-drop=all", "--cap-add=NET_ADMIN,SETUID,SETGID",

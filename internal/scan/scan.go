@@ -106,9 +106,12 @@ func pointsInto(p, gitDir string) bool {
 	return fspath.Within(fspath.Real(target), fspath.Real(gitDir))
 }
 
+// StatesDir holds one state dir per project, named by project ID.
+func StatesDir(dataDir string) string { return filepath.Join(dataDir, "state") }
+
 // StatePath is where a project's findings are recorded.
 func StatePath(dataDir, projectID string) string {
-	return filepath.Join(dataDir, "state", projectID, "findings")
+	return filepath.Join(StatesDir(dataDir), projectID, "findings")
 }
 
 // Load reads recorded findings; a missing file has none.

@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"k8c.io/agent-sandbox/internal/config"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/project"
 )
@@ -54,7 +55,7 @@ func TestRunArgsGoldenRO(t *testing.T) {
 	p, cfg, plan := goldenPlan(t)
 	golden(t, "run-ro", RunArgs(RunInput{
 		Container: project.ContainerName(p.ID, "default"),
-		Labels:    Labels(p, "default", "ro", "feedface", "beef"),
+		Labels:    labels.Container(p, "default", "ro", "feedface", "beef"),
 		Hostname:  "asb-proj",
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
@@ -134,7 +135,7 @@ func TestRunArgsGoldenWorktree(t *testing.T) {
 	}
 	golden(t, "run-worktree", RunArgs(RunInput{
 		Container: project.ContainerName(p.ID, "default"),
-		Labels:    Labels(p, "default", "worktree", "feedface", "beef"),
+		Labels:    labels.Container(p, "default", "worktree", "feedface", "beef"),
 		Hostname:  "asb-proj",
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
@@ -191,7 +192,7 @@ func TestConfigHash(t *testing.T) {
 	p, cfg, plan := goldenPlan(t)
 	base := RunInput{
 		Container: project.ContainerName(p.ID, "default"),
-		Labels:    Labels(p, "default", "ro", "feedface", "beef"),
+		Labels:    labels.Container(p, "default", "ro", "feedface", "beef"),
 		Hostname:  "asb-proj",
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
@@ -199,12 +200,12 @@ func TestConfigHash(t *testing.T) {
 		Command:   InitCommand(cfg, 1000, nil),
 	}
 	h := ConfigHash(base)
-	if got := RunArgs(base); !slices.Contains(got, ConfigLabel+"="+h) {
-		t.Errorf("RunArgs lacks the %s label: %q", ConfigLabel, got)
+	if got := RunArgs(base); !slices.Contains(got, labels.Config+"="+h) {
+		t.Errorf("RunArgs lacks the %s label: %q", labels.Config, got)
 	}
 	same := map[string]func(*RunInput){
 		"image":  func(in *RunInput) { in.Image = "img:2" },
-		"labels": func(in *RunInput) { in.Labels = Labels(p, "default", "ro", "cafe", "f00d") },
+		"labels": func(in *RunInput) { in.Labels = labels.Container(p, "default", "ro", "cafe", "f00d") },
 	}
 	for name, mod := range same {
 		in := base

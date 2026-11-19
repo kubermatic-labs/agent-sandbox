@@ -14,13 +14,17 @@ import (
 	"strings"
 
 	"k8c.io/agent-sandbox/internal/flock"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/treehash"
 )
 
+// ProjectRepoPrefix starts the repository of every project's image tags.
+const ProjectRepoPrefix = "localhost/asb-"
+
 // ProjectRepo returns the repository of a project's image tags.
 func ProjectRepo(projectID string) string {
-	return "localhost/asb-" + projectID
+	return ProjectRepoPrefix + projectID
 }
 
 // CheckProjectContainerfile requires the final stage to build on the base
@@ -62,6 +66,7 @@ func ProjectTag(projectID, baseImageID, contextDir string) (string, error) {
 // ProjectInput describes one project image build.
 type ProjectInput struct {
 	ProjectID   string
+	ProjectRoot string // recorded in a label, so prune can find images of deleted projects
 	ContextDir  string // the trusted snapshot of .agent-sandbox/
 	BaseTag     string
 	BaseImageID string
@@ -76,6 +81,7 @@ func ProjectBuildArgs(tag string, in ProjectInput, opts BuildOptions) []string {
 		"build", "--tag", tag, "--file", filepath.Join(in.ContextDir, "Containerfile"),
 		"--build-arg", "BASE_IMAGE=" + in.BaseTag,
 	}
+	args = append(args, labels.Args(labels.ProjectImage(in.ProjectRoot, in.ProjectID))...)
 	if opts.NoCache || opts.Pull {
 		args = append(args, "--no-cache")
 	}

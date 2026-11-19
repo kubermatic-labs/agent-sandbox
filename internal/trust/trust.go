@@ -39,9 +39,25 @@ type Store struct {
 	dir string
 }
 
+// StoresDir holds one store per project, named by project ID.
+func StoresDir(dataDir string) string { return filepath.Join(dataDir, "trust") }
+
 // NewStore returns the store for a project.
 func NewStore(dataDir, projectID string) Store {
-	return Store{dir: filepath.Join(dataDir, "trust", projectID)}
+	return Store{dir: filepath.Join(StoresDir(dataDir), projectID)}
+}
+
+// Dir is the store's directory.
+func (s Store) Dir() string { return s.dir }
+
+// Forget removes the store. The hash goes first, so an interrupted removal
+// leaves the project untrusted (asked again), never trusted without its
+// snapshot.
+func (s Store) Forget() error {
+	if err := os.Remove(s.hashFile()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return os.RemoveAll(s.dir)
 }
 
 // SnapshotDir is the last approved copy of .agent-sandbox/.

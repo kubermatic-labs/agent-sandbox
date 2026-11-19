@@ -38,6 +38,9 @@ agent: a change that weakens isolation is a bug even if the tests pass.
   `/workspace`-style paths: error messages and `file:line` links depend on the host paths.
 - Adding a config key touches several places: `internal/config/config.go`, `validate.go`, `README.md`, the design
   spec, and `configTemplate` in `internal/app/manage.go`.
+- Podman labels are defined only in `internal/labels` and listed only in the spec 2.1 table; use the constants and
+  builders, never a literal key. Never rename a key or value: objects from older versions would be orphaned.
+  `labels_test.go` is the one place that spells them out.
 - Integration tests isolate state with `AGENT_SANDBOX_CONFIG_DIR` and `AGENT_SANDBOX_DATA_DIR`; never change
   `XDG_CONFIG_HOME`/`XDG_DATA_HOME` (podman keeps its image store there). Tests clean up by
   `agent-sandbox.project-id` labels.

@@ -17,6 +17,7 @@ import (
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/initd"
 	"k8c.io/agent-sandbox/internal/proxy"
+	"k8c.io/agent-sandbox/internal/prune"
 )
 
 // commands are the implementations the CLI dispatches to; tests replace them.
@@ -29,6 +30,7 @@ type commands struct {
 	worktreeList func(ctx context.Context, out io.Writer) error
 	worktreeRm   func(ctx context.Context, name string, force, deleteBranch bool, out io.Writer) error
 	scaffold     func(ctx context.Context, o app.InitOptions, out io.Writer) error
+	prune        func(ctx context.Context, o app.PruneOptions, out io.Writer) error
 }
 
 func main() {
@@ -41,6 +43,7 @@ func main() {
 		worktreeList: app.WorktreeList,
 		worktreeRm:   app.WorktreeRm,
 		scaffold:     app.Init,
+		prune:        app.Prune,
 	}))
 }
 
@@ -97,7 +100,7 @@ func newRootCmd(code *int, cmds commands) *cobra.Command {
 	root.Flags().BoolVar(&replace, "replace", false, "stop a running sandbox whose config, git mode, image or binary differs (ending its sessions) and start a new one")
 	root.AddCommand(
 		newScaffoldCmd(cmds), newTrustCmd(cmds.trust), newBuildCmd(cmds.build),
-		newStatusCmd(cmds), newStopCmd(cmds), newWorktreeCmd(cmds),
+		newStatusCmd(cmds), newStopCmd(cmds), newWorktreeCmd(cmds), newPruneCmd(cmds),
 		newPID1Cmd(code), newProxyCmd(),
 	)
 	return root
@@ -180,6 +183,64 @@ func newWorktreeCmd(cmds commands) *cobra.Command {
 	rm.Flags().BoolVar(&deleteBranch, "delete-branch", false, "also delete branch asb/NAME")
 	wt.AddCommand(list, rm)
 	return wt
+}
+
+func newPruneCmd(cmds commands) *cobra.Command {
+	var o app.PruneOptions
+	var orphaned, allProjects bool
+	cmd := &cobra.Command{
+		Use:   "prune {containers|volumes|images|state|all}... [--orphaned | --all-projects] [--base] [--force] [--dry-run] [-y]",
+		Short: "Remove this project's containers, volumes, images or state (--orphaned: of deleted projects; --all-projects: of all)",
+		Long: `Remove what agent-sandbox leaves behind, for this project by default.
+
+  containers  sandbox containers; running ones only with --force, which ends their sessions
+  volumes     home and cache volumes; the home volume holds the agents' settings and history
+  images      project images; base images, which all projects share, only with --base
+  state       trust approvals (asked again next time) and post-session scan findings
+  all         all of the above
+
+--orphaned selects projects whose directory no longer exists (a directory on an
+unmounted drive counts as gone); --all-projects selects every project.
+
+prune lists what it will remove and asks first. Nothing a container still uses is
+removed, nor anything without agent-sandbox's labels, nor worktrees.`,
+		ValidArgs: []string{"containers", "volumes", "images", "state", "all"},
+		Args:      cobra.OnlyValidArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			for _, a := range args {
+				switch a {
+				case "containers":
+					o.Containers = true
+				case "volumes":
+					o.Volumes = true
+				case "images":
+					o.Images = true
+				case "state":
+					o.State = true
+				case "all":
+					o.Kinds = prune.Kinds{Containers: true, Volumes: true, Images: true, State: true}
+				}
+			}
+			switch {
+			case orphaned:
+				o.Scope = prune.ScopeOrphaned
+			case allProjects:
+				o.Scope = prune.ScopeAll
+			}
+			return cmds.prune(cmd.Context(), o, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().BoolVar(&orphaned, "orphaned", false, "projects whose directory no longer exists")
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "every project")
+	cmd.MarkFlagsMutuallyExclusive("orphaned", "all-projects")
+	cmd.Flags().BoolVar(&o.Base, "base", false, "with images: also the base images, which all projects share (rebuilt on next use)")
+	cmd.Flags().BoolVar(&o.Force, "force", false, "also stop and remove running sandboxes, ending their sessions")
+	cmd.Flags().BoolVar(&o.DryRun, "dry-run", false, "only list what would be removed")
+	cmd.Flags().BoolVarP(&o.Yes, "yes", "y", false, "do not ask before removing")
+	return cmd
 }
 
 // newPID1Cmd is the container's PID 1 (spec 4.2). Hidden: users never run it.

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"k8c.io/agent-sandbox/internal/flock"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/treehash"
 )
@@ -100,6 +101,7 @@ func BaseTag(contextDir string) (string, error) {
 // BuildArgs returns the podman build argv.
 func BuildArgs(tag, contextDir string, opts BuildOptions) []string {
 	args := []string{"build", "--tag", tag, "--file", filepath.Join(contextDir, "Containerfile")}
+	args = append(args, labels.Args(labels.BaseImage())...)
 	switch {
 	case opts.Pull:
 		args = append(args, "--pull=always", "--no-cache")

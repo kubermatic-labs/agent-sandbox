@@ -17,6 +17,11 @@ func Build(ctx context.Context, opts image.BuildOptions) error {
 	if err != nil {
 		return err
 	}
+	release, err := e.holdPruneLock()
+	if err != nil {
+		return err
+	}
+	defer release()
 	state, err := e.checkTrust()
 	if err != nil {
 		return err
@@ -39,6 +44,11 @@ func Trust(_ context.Context) error {
 	if err != nil {
 		return err
 	}
+	release, err := e.holdPruneLock()
+	if err != nil {
+		return err
+	}
+	defer release()
 	dir := filepath.Join(e.proj.Root, trust.DirName)
 	c, err := trust.Evaluate(e.proj.Root, e.trustStore())
 	if err != nil {

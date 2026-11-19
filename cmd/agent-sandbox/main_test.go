@@ -43,6 +43,10 @@ func (r *recorder) cmds() commands {
 			r.calls = append(r.calls, fmt.Sprintf("worktree rm %s force=%v delete=%v", name, force, del))
 			return r.err
 		},
+		prune: func(_ context.Context, o app.PruneOptions, _ io.Writer) error {
+			r.calls = append(r.calls, fmt.Sprintf("prune %+v scope=%d base=%v force=%v dry=%v yes=%v", o.Kinds, o.Scope, o.Base, o.Force, o.DryRun, o.Yes))
+			return r.err
+		},
 		scaffold: func(_ context.Context, o app.InitOptions, _ io.Writer) error {
 			r.calls = append(r.calls, fmt.Sprintf("init base=%s caches=%q detect=%v", o.Base, o.Caches, o.DetectCaches))
 			return r.err
@@ -176,6 +180,12 @@ func TestManagementCommands(t *testing.T) {
 		{[]string{"init", "--caches=pip", "--caches", "go"}, `init base= caches=["pip" "go"] detect=false`, 0},
 		{[]string{"init", "--caches="}, `init base= caches=[] detect=false`, 0},
 		{[]string{"init", "x"}, "", 1},
+		{[]string{"prune", "containers"}, "prune {Containers:true Volumes:false Images:false State:false} scope=0 base=false force=false dry=false yes=false", 0},
+		{[]string{"prune", "volumes", "images", "--orphaned", "-y"}, "prune {Containers:false Volumes:true Images:true State:false} scope=1 base=false force=false dry=false yes=true", 0},
+		{[]string{"prune", "all", "--all-projects", "--base", "--force", "--dry-run"}, "prune {Containers:true Volumes:true Images:true State:true} scope=2 base=true force=true dry=true yes=false", 0},
+		{[]string{"prune", "state", "--yes"}, "prune {Containers:false Volumes:false Images:false State:true} scope=0 base=false force=false dry=false yes=true", 0},
+		{[]string{"prune", "everything"}, "", 1},
+		{[]string{"prune", "all", "--orphaned", "--all-projects"}, "", 1},
 	} {
 		r := &recorder{}
 		var stderr bytes.Buffer
@@ -184,5 +194,20 @@ func TestManagementCommands(t *testing.T) {
 		if code != tt.code || got != tt.want || len(r.runs) != 0 {
 			t.Errorf("%q: exit %d, calls %q, runs %d; want exit %d, %q (stderr %q)", tt.args, code, got, len(r.runs), tt.code, tt.want, stderr.String())
 		}
+	}
+}
+
+func TestPruneWithoutKindShowsHelp(t *testing.T) {
+	r := &recorder{}
+	code := 0
+	root := newRootCmd(&code, r.cmds())
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"prune"})
+	if err := root.ExecuteContext(context.Background()); err != nil || code != 0 {
+		t.Fatalf("prune: %v, exit %d", err, code)
+	}
+	if len(r.calls) != 0 || !strings.Contains(out.String(), "Usage:") || !strings.Contains(out.String(), "--all-projects") {
+		t.Errorf("calls %q, output:\n%s", r.calls, out.String())
 	}
 }

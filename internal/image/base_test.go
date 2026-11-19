@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"k8c.io/agent-sandbox/internal/config"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/podman/podmantest"
 )
@@ -136,10 +137,11 @@ func TestBuildArgs(t *testing.T) {
 		opts BuildOptions
 		want []string
 	}{
-		{BuildOptions{}, []string{"build", "--tag", "t", "--file", "/c/Containerfile", "/c"}},
-		{BuildOptions{NoCache: true}, []string{"build", "--tag", "t", "--file", "/c/Containerfile", "--no-cache", "/c"}},
-		{BuildOptions{Pull: true}, []string{"build", "--tag", "t", "--file", "/c/Containerfile", "--pull=always", "--no-cache", "/c"}},
+		{BuildOptions{}, []string{"/c"}},
+		{BuildOptions{NoCache: true}, []string{"--no-cache", "/c"}},
+		{BuildOptions{Pull: true}, []string{"--pull=always", "--no-cache", "/c"}},
 	} {
+		tt.want = slices.Concat([]string{"build", "--tag", "t", "--file", "/c/Containerfile"}, labels.Args(labels.BaseImage()), tt.want)
 		if got := BuildArgs("t", "/c", tt.opts); !slices.Equal(got, tt.want) {
 			t.Errorf("BuildArgs(%+v) = %q", tt.opts, got)
 		}

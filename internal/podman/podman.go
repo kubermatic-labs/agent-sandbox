@@ -171,9 +171,17 @@ func (c Client) VolumeCreate(ctx context.Context, name string, labels map[string
 	return err
 }
 
-// VolumeRemove force-removes a named volume.
+// VolumeRemove force-removes a named volume. Force also removes every
+// container that uses it: only for volumes no container can use yet.
 func (c Client) VolumeRemove(ctx context.Context, name string) error {
 	_, err := c.R.Output(ctx, "volume", "rm", "--force", name)
+	return err
+}
+
+// VolumeRemoveUnused removes a named volume; podman refuses if a container
+// uses it.
+func (c Client) VolumeRemoveUnused(ctx context.Context, name string) error {
+	_, err := c.R.Output(ctx, "volume", "rm", name)
 	return err
 }
 
@@ -261,6 +269,35 @@ func (c Client) ListVolumes(ctx context.Context, labels map[string]string) ([]Vo
 		return nil, fmt.Errorf("parsing podman volume ls output: %w", err)
 	}
 	return vs, nil
+}
+
+// Image is one entry of podman images --format json.
+type Image struct {
+	ID         string            `json:"Id"`
+	RepoTags   []string          `json:"RepoTags"`
+	Labels     map[string]string `json:"Labels"`
+	Containers int               `json:"Containers"` // containers using it, any state
+	Dangling   bool              `json:"Dangling"`
+}
+
+// ListImages returns all local images (not intermediate build layers).
+func (c Client) ListImages(ctx context.Context) ([]Image, error) {
+	out, err := c.R.Output(ctx, "images", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var is []Image
+	if err := json.Unmarshal(out, &is); err != nil {
+		return nil, fmt.Errorf("parsing podman images output: %w", err)
+	}
+	return is, nil
+}
+
+// ImageRemove removes an image tag, or an image by ID; podman refuses if a
+// container uses it.
+func (c Client) ImageRemove(ctx context.Context, ref string) error {
+	_, err := c.R.Output(ctx, "rmi", ref)
+	return err
 }
 
 // ImageTags returns an image's tags; none means a newer build took them.

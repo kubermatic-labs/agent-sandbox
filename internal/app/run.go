@@ -17,6 +17,7 @@ import (
 	"k8c.io/agent-sandbox/internal/hostgit"
 	"k8c.io/agent-sandbox/internal/image"
 	"k8c.io/agent-sandbox/internal/initd"
+	"k8c.io/agent-sandbox/internal/labels"
 	"k8c.io/agent-sandbox/internal/mounts"
 	"k8c.io/agent-sandbox/internal/podman"
 	"k8c.io/agent-sandbox/internal/project"
@@ -46,6 +47,14 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// Held from the trust check until the container runs: prune must not
+	// remove the trust record, an image or a volume while they are in use
+	// here. Released before the session, which may run for hours.
+	releasePrune, err := e.holdPruneLock()
+	if err != nil {
+		return 1, err
+	}
+	defer releasePrune()
 	state, err := e.checkTrust()
 	if err != nil {
 		return 1, err
@@ -139,7 +148,7 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 	}
 	runIn := sandbox.RunInput{
 		Container: container,
-		Labels:    sandbox.Labels(proj, o.Name, cfg.Git, im.imageID, binHash),
+		Labels:    labels.Container(proj, o.Name, cfg.Git, im.imageID, binHash),
 		Hostname:  project.Hostname(proj.Root),
 		Resources: cfg.Resources,
 		Mounts:    plan.Mounts,
@@ -171,11 +180,12 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		Stdio:        podman.Stdio{In: os.Stdin, Out: os.Stdout, Err: os.Stderr},
 		Log:          os.Stderr,
 		Container:    container,
-		Lookup:       sandbox.Lookup(proj.ID, o.Name),
+		Lookup:       labels.Lookup(proj.ID, o.Name),
 		RunArgv:      runArgv,
 		LockDir:      p.RuntimeDir,
+		PruneLock:    p.PruneLock(),
 		Volumes:      plan.Volumes,
-		VolumeLabels: sandbox.VolumeLabels(proj.ID),
+		VolumeLabels: labels.Volume(proj),
 		VolumeImage:  im.base,
 		UID:          os.Getuid(),
 		GID:          os.Getgid(),
@@ -188,6 +198,10 @@ func Run(ctx context.Context, o RunOptions) (int, error) {
 		ConfigHash:   sandbox.ConfigHash(runIn),
 		Replace:      o.Replace,
 	}
+	if err := sb.Ensure(ctx); err != nil {
+		return 1, err
+	}
+	releasePrune()
 	code, err := sb.Exec(ctx, execArgv)
 	if err != nil {
 		return code, err
