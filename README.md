@@ -16,11 +16,24 @@ LAN by default, and optionally no exfiltration. The design and its reasoning are
 
 ## Install
 
+For now it's "install from main it's always safe and stable".
+
 ```sh
-just build                       # CGO_ENABLED=0 go build -o dist/agent-sandbox ./cmd/agent-sandbox
-install -m 0755 dist/agent-sandbox ~/.local/bin/
-ln -s agent-sandbox ~/.local/bin/asb     # optional short name
+go install k8c.io/agent-sandbox/cmd/agent-sandbox@main
 ```
+
+## Development
+
+```sh
+just build          # will build a binary to dist/agent-sandbox
+just install        # will build a binary to $GOBIN/agent-sandbox
+just test           # unit tests
+just integration    # real rootless podman; each escape attempt must fail
+just lint
+```
+
+The integration tests use `AGENT_SANDBOX_CONFIG_DIR` and `AGENT_SANDBOX_DATA_DIR` to keep their state out of yours;
+they never change `XDG_*`, which would also move podman's own configuration and image store.
 
 Agents can authenticate through `~/.config/agent-sandbox/secrets.env` (see [Secrets](#secrets)):
 
@@ -225,14 +238,3 @@ agent-sandbox narrows what an agent can do; it does not make running one risk-fr
 - Named sandboxes of one project share its home and cache volumes, so state one session plants persists into later
   sessions of the same project (never of another project).
 - A session can leave a background process running, which keeps the sandbox from going idle; `stop` ends it.
-
-## Development
-
-```sh
-just test          # unit tests
-just integration   # real rootless podman; each escape attempt must fail
-just lint
-```
-
-The integration tests use `AGENT_SANDBOX_CONFIG_DIR` and `AGENT_SANDBOX_DATA_DIR` to keep their state out of yours;
-they never change `XDG_*`, which would also move podman's own configuration and image store.
